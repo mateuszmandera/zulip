@@ -40,6 +40,7 @@ server {
         alias /home/zulip/local-static;
     }
 
+    set $tornado_server http://tornado;
     include /etc/nginx/zulip-include/certbot;
     include /etc/nginx/zulip-include/app;
 }
