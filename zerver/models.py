@@ -774,6 +774,10 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
     enable_login_emails = models.BooleanField(default=True)  # type: bool
     realm_name_in_notifications = models.BooleanField(default=False)  # type: bool
 
+    # PGP preferences
+    want_encrypted_emails = models.BooleanField(default=False)  # type: bool
+    want_signed_emails = models.BooleanField(default=False)  # type: bool
+
     # Words that trigger a mention for this user, formatted as a json-serialized list of strings
     alert_words = models.TextField(default=u'[]')  # type: str
 
@@ -2569,3 +2573,7 @@ class BotConfigData(models.Model):
 
     class Meta(object):
         unique_together = ("bot_profile", "key")
+
+class UserPGP(models.Model):
+    user_profile = models.OneToOneField(UserProfile, on_delete=CASCADE)  # type: UserProfile
+    public_key = models.TextField()  # type: str
