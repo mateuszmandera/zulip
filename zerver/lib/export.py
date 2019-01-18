@@ -111,6 +111,7 @@ ALL_ZULIP_TABLES = {
     'zerver_usergroupmembership',
     'zerver_userhotspot',
     'zerver_usermessage',
+    'zerver_userpgp',
     'zerver_userpresence',
     'zerver_userprofile',
     'zerver_userprofile_groups',
@@ -183,6 +184,7 @@ NON_EXPORTED_TABLES = {
     'zerver_userstatus',
 
     # For any tables listed below here, it's a bug that they are not present in the export.
+    'zerver_userpgp',
 }
 
 IMPLICIT_TABLES = {
