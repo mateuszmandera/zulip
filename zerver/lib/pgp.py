@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 
+from zerver.lib.email_helpers import format_to
 from zerver.lib.logging_util import log_to_file
 from zerver.models import UserProfile, UserPGP
 
@@ -11,11 +12,6 @@ import logging
 
 logger = logging.getLogger('zulip.pgp')
 log_to_file(logger, settings.EMAIL_LOG_PATH)
-
-def format_to(to_user: UserProfile) -> str:
-    # Change to formataddr((to_user.full_name, to_user.email)) once
-    # https://github.com/zulip/zulip/issues/4676 is resolved
-    return to_user.delivery_email
 
 def pgp_sign_and_encrypt(message: EmailMultiAlternatives, to_users: List[UserProfile],
                          force_single_message: bool=False) -> List[EmailMultiAlternatives]:
