@@ -18,8 +18,6 @@ from typing import Dict, Optional, List, DefaultDict, Callable, Any, Union, \
 
 from gnupg import GPG
 
-_gpg = GPG(gnupghome=settings.GPG_HOME)
-
 class PGPKeyNotFound(Exception):
     pass
 
@@ -234,28 +232,30 @@ def form_encrypted_message(encrypted_content: str) -> Message:
     return msg
 
 def gpg_sign_content(content: bytes) -> str:
-    result = _gpg.sign(content, detach=True,
-                       passphrase=settings.GPG_PASSPHRASE)
+    gpg = GPG(gnupghome=settings.GPG_HOME)
+    result = gpg.sign(content, detach=True,
+                      passphrase=settings.GPG_PASSPHRASE)
     if not result:
         raise PGPSignatureFailed("Status: " + str(result.status))
 
     return smart_text(result)
 
 def gpg_encrypt_content(content: bytes, public_keys: List[str], sign: bool=False) -> str:
+    gpg = GPG(gnupghome=settings.GPG_HOME)
     try:
-        import_result = _gpg.import_keys('\n'.join(public_keys))
+        import_result = gpg.import_keys('\n'.join(public_keys))
         if len(import_result.fingerprints) < len(public_keys):
             raise PGPEncryptionFailed("Failed to import public keys:\n" + str(import_result.results))
 
-        encryption_result = _gpg.encrypt(content, import_result.fingerprints,
-                                         sign=sign, always_trust=True,
-                                         passphrase=settings.GPG_PASSPHRASE)
+        encryption_result = gpg.encrypt(content, import_result.fingerprints,
+                                        sign=sign, always_trust=True,
+                                        passphrase=settings.GPG_PASSPHRASE)
         if not encryption_result:
             raise PGPEncryptionFailed("Status: " + str(encryption_result.status))
     finally:
         # We need to clean out any added keys from the keyring,
         # no matter what happens in the above block of code.
-        _gpg.delete_keys(import_result.fingerprints)
+        gpg.delete_keys(import_result.fingerprints)
 
     return smart_text(encryption_result)
 
@@ -265,18 +265,20 @@ gpg_sign_content and gpg_encrypt_content.
 '''
 
 def gpg_decrypt_content(content: str) -> Tuple[bytes, bool]:
-    result = _gpg.decrypt(content, always_trust=True,
-                          passphrase=settings.GPG_PASSPHRASE)
+    gpg = GPG(gnupghome=settings.GPG_HOME)
+    result = gpg.decrypt(content, always_trust=True,
+                         passphrase=settings.GPG_PASSPHRASE)
 
     return result.data, result.valid
 
 def gpg_verify_signature(signature: str, data: bytes) -> bool:
     from tempfile import NamedTemporaryFile
 
+    gpg = GPG(gnupghome=settings.GPG_HOME)
     # We set buffering=0, because by default file.name may be
     # an empty file when opened by _gpg.verify
     with NamedTemporaryFile(buffering=0) as file:
         file.write(data)
-        verify = _gpg.verify(signature, data_filename=file.name)
+        verify = gpg.verify(signature, data_filename=file.name)
 
     return bool(verify)

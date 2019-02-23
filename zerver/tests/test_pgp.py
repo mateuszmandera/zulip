@@ -7,9 +7,10 @@ from django.test import override_settings
 from email import message_from_bytes
 from email.message import Message
 
+from gnupg import GPG
+
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.lib.pgp import (
-    _gpg,
     gpg_encrypt_content,
     gpg_decrypt_content,
     gpg_sign_content,
@@ -23,23 +24,27 @@ from zerver.lib.pgp import (
 
 from zerver.models import UserProfile, UserPGP
 
+from shutil import rmtree
 from typing import List, Dict
 
 import os
 
 def setup_testing_keyring(server_key: str) -> None:
-    result = _gpg.import_keys(server_key)
+    gpg = GPG(gnupghome=settings.GPG_HOME)
+    result = gpg.import_keys(server_key)
     f = open(os.path.join(settings.GPG_HOME, "gpg.conf"), "w")
     f.write("default-key " + result.fingerprints[0])
     f.close()
 
 def destroy_testing_keyring() -> None:
-    from shutil import rmtree
     rmtree(settings.GPG_HOME)
 
 class TestPGP(ZulipTestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        gpg = GPG(gnupghome=settings.GPG_HOME)
+        cls.gpg = gpg
+
         # ugly hack to have access to helpers inside this class method
         helper = ZulipTestCase()
 
@@ -49,21 +54,21 @@ class TestPGP(ZulipTestCase):
         hamlet_key = helper.fixture_data('hamlet_key.asc', type='email/pgp')
         othello_key = helper.fixture_data('othello_key.asc', type='email/pgp')
         iago_key = helper.fixture_data('iago_key.asc', type='email/pgp')
-        _gpg.import_keys('\n'.join([hamlet_key, othello_key, iago_key]))
+        gpg.import_keys('\n'.join([hamlet_key, othello_key, iago_key]))
 
         user_profile = helper.example_user('hamlet')
         user_pgp = UserPGP(user_profile=user_profile,
-                           public_key=str(_gpg.export_keys(helper.example_email('hamlet'))))
+                           public_key=str(gpg.export_keys(helper.example_email('hamlet'))))
         user_pgp.save()
 
         user_profile = helper.example_user('othello')
         user_pgp = UserPGP(user_profile=user_profile,
-                           public_key=str(_gpg.export_keys(helper.example_email('othello'))))
+                           public_key=str(gpg.export_keys(helper.example_email('othello'))))
         user_pgp.save()
 
         user_profile = helper.example_user('iago')
         user_pgp = UserPGP(user_profile=user_profile,
-                           public_key=str(_gpg.export_keys(helper.example_email('iago'))))
+                           public_key=str(gpg.export_keys(helper.example_email('iago'))))
         user_pgp.save()
 
     @classmethod
@@ -118,8 +123,8 @@ class TestPGP(ZulipTestCase):
     def test_gpg_encryption(self) -> None:
         data = "test message".encode()
         hamlet_key = self.fixture_data('hamlet_key.asc', type='email/pgp')
-        _gpg.import_keys(hamlet_key)
-        hamlet_pubkey = _gpg.export_keys(self.example_email('hamlet'))
+        self.gpg.import_keys(hamlet_key)
+        hamlet_pubkey = self.gpg.export_keys(self.example_email('hamlet'))
 
         encrypted = gpg_encrypt_content(data, [hamlet_pubkey])
         decrypted, signed = gpg_decrypt_content(encrypted)
@@ -131,20 +136,22 @@ class TestPGP(ZulipTestCase):
         self.assertTrue(signed)
         self.assertEqual(data, decrypted)
 
-    @override_settings(GPG_PASSPHRASE='wrong')
-    def test_gpg_sign_wrong_pass(self) -> None:
+    @override_settings(GPG_HOME=os.path.join(settings.DEPLOY_ROOT, '.emptygpg'))
+    def test_gpg_sign_wrong_gpghome(self) -> None:
         with self.assertRaises(PGPSignatureFailed):
-            signature = gpg_sign_content(b'test')
-            print("sig:")
-            print(signature)
+            gpg_sign_content(b'test')
 
-    @override_settings(GPG_PASSPHRASE='wrong')
-    def test_pgp_encrypt_wrong_pass(self) -> None:
+        rmtree(os.path.join(settings.DEPLOY_ROOT, '.emptygpg'))
+
+    @override_settings(GPG_HOME=os.path.join(settings.DEPLOY_ROOT, '.emptygpg'))
+    def test_pgp_encrypt_wrong_gpghome(self) -> None:
         hamlet_key = self.fixture_data('hamlet_key.asc', type='email/pgp')
-        _gpg.import_keys(hamlet_key)
-        hamlet_pubkey = _gpg.export_keys(self.example_email('hamlet'))
+        self.gpg.import_keys(hamlet_key)
+        hamlet_pubkey = self.gpg.export_keys(self.example_email('hamlet'))
         with self.assertRaises(PGPEncryptionFailed):
             gpg_encrypt_content(b'test', [hamlet_pubkey], sign=True)
+
+        rmtree(os.path.join(settings.DEPLOY_ROOT, '.emptygpg'))
 
     def test_pgp_encrypt_broken_pubkey(self) -> None:
         with self.assertRaises(PGPEncryptionFailed):
