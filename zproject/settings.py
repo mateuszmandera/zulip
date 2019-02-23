@@ -1382,9 +1382,18 @@ EMAIL_HOST_PASSWORD = get_secret('email_password')
 EMAIL_GATEWAY_PASSWORD = get_secret('email_gateway_password')
 AUTH_LDAP_BIND_PASSWORD = get_secret('auth_ldap_bind_password', '')
 
-# Keep these disabled until the features are implemented
-ENABLE_EMAIL_ENCRYPTION = False
-ENABLE_EMAIL_SIGNATURES = False
+ENABLE_EMAIL_ENCRYPTION = True
+ENABLE_EMAIL_SIGNATURES = True
+
+# Hash algorithm used when signing with gpg.
+# This is determined when generating your private key with gpg.
+# Check gpg documentation for details on how to adjust this.
+# The value set here needs to match the hash algorithm gpg will use
+# or some email clients may fail to correctly verify signed email messages.
+GPG_HASH_ALGO = "SHA256"
+# Passphrase (if required) for signing using your private key.
+GPG_PASSPHRASE = None
+GPG_HOME = "~/.pgp_zulip"
 
 # Set the sender email address for Django traceback error reporting
 if SERVER_EMAIL is None:

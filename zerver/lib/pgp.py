@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, SafeMIMEMultipart, \
     SafeMIMEText
+from django.utils.encoding import smart_text
 
 from email.encoders import encode_7or8bit
 from email.header import Header
@@ -12,9 +13,20 @@ from zerver.lib.logging_util import log_to_file
 from zerver.models import UserProfile, UserPGP
 
 from copy import deepcopy
-from typing import Dict, Optional, List, DefaultDict, Callable, Any, Union
+from typing import Dict, Optional, List, DefaultDict, Callable, Any, Union, \
+    Tuple
+
+from gnupg import GPG
+
+_gpg = GPG(gnupghome=settings.GPG_HOME)
 
 class PGPKeyNotFound(Exception):
+    pass
+
+class PGPSignatureFailed(Exception):
+    pass
+
+class PGPEncryptionFailed(Exception):
     pass
 
 # To have the email correctly formatted according to PGP/MIME (RFC3156),
@@ -101,7 +113,7 @@ class PGPEmailMessage(EmailMultiAlternatives):
         self._cache_original_message()
 
         base_msg = self.get_base_message()
-        encrypted_content = gpg_encrypt_content(base_msg.as_string(linesep='\r\n'),
+        encrypted_content = gpg_encrypt_content(base_msg.as_bytes(linesep='\r\n'),
                                                 public_keys, sign)
         self._generated_message = form_encrypted_message(encrypted_content)
         self._set_headers()
@@ -188,7 +200,7 @@ def _sign_and_encrypt(message: PGPEmailMessage, to_emails: List[str],
 def create_signature_mime(to_sign: Union[SafeMIMEMultipart, SafeMIMEText]) -> Message:
     signature = gpg_sign_content(to_sign.as_bytes(linesep='\r\n'))
     sigtype = 'pgp-signature; name="signature.asc"'
-    signature_mime = MIMEApplication(_data=signature, _subtype=sigtype,
+    signature_mime = MIMEApplication(_data=signature.encode(), _subtype=sigtype,
                                      _encoder=encode_7or8bit)
     signature_mime['Content-Description'] = 'signature'
     signature_mime.set_charset('us-ascii')
@@ -199,17 +211,18 @@ def create_signature_mime(to_sign: Union[SafeMIMEMultipart, SafeMIMEText]) -> Me
 def form_signed_message(signature_mime: Message,
                         base_msg: Union[SafeMIMEMultipart, SafeMIMEText]) -> Message:
     msg = SafeMIMEMultipart(_subtype='signed', encoding=base_msg.encoding,
-                            micalg='pgp-sha256', protocol='application/pgp-signature')
+                            micalg='pgp-'+settings.GPG_HASH_ALGO.lower(),
+                            protocol='application/pgp-signature')
     msg.attach(base_msg)
     msg.attach(signature_mime)
 
     return msg
 
-def form_encrypted_message(encrypted_content: bytes) -> Message:
+def form_encrypted_message(encrypted_content: str) -> Message:
     version_string = "Version: 1"
     control_mime = MIMEApplication(_data=version_string.encode(), _subtype='pgp-encrypted',
                                    _encoder=encode_7or8bit)
-    encrypted_mime = MIMEApplication(_data=encrypted_content, _subtype='octet-stream',
+    encrypted_mime = MIMEApplication(_data=encrypted_content.encode(), _subtype='octet-stream',
                                      _encoder=encode_7or8bit)
     del control_mime['MIME-Version']
     del encrypted_mime['MIME-Version']
@@ -220,10 +233,50 @@ def form_encrypted_message(encrypted_content: bytes) -> Message:
 
     return msg
 
-def gpg_sign_content(content: str) -> bytes:
-    return "dummysignature".encode()
+def gpg_sign_content(content: bytes) -> str:
+    result = _gpg.sign(content, detach=True,
+                       passphrase=settings.GPG_PASSPHRASE)
+    if not result:
+        raise PGPSignatureFailed("Status: " + str(result.status))
 
-def gpg_encrypt_content(content: str, public_keys: List[str], sign: bool=False) -> bytes:
-    if sign:
-        return 'dummysignedciphertext'.encode()
-    return 'dummyciphertext'.encode()
+    return smart_text(result)
+
+def gpg_encrypt_content(content: bytes, public_keys: List[str], sign: bool=False) -> str:
+    try:
+        import_result = _gpg.import_keys('\n'.join(public_keys))
+        if len(import_result.fingerprints) < len(public_keys):
+            raise PGPEncryptionFailed("Failed to import public keys:\n" + str(import_result.results))
+
+        encryption_result = _gpg.encrypt(content, import_result.fingerprints,
+                                         sign=sign, always_trust=True,
+                                         passphrase=settings.GPG_PASSPHRASE)
+        if not encryption_result:
+            raise PGPEncryptionFailed("Status: " + str(encryption_result.status))
+    finally:
+        # We need to clean out any added keys from the keyring,
+        # no matter what happens in the above block of code.
+        _gpg.delete_keys(import_result.fingerprints)
+
+    return smart_text(encryption_result)
+
+'''
+The functions below aren't used for sending PGP emails, but are needed to test
+gpg_sign_content and gpg_encrypt_content.
+'''
+
+def gpg_decrypt_content(content: str) -> Tuple[bytes, bool]:
+    result = _gpg.decrypt(content, always_trust=True,
+                          passphrase=settings.GPG_PASSPHRASE)
+
+    return result.data, result.valid
+
+def gpg_verify_signature(signature: str, data: bytes) -> bool:
+    from tempfile import NamedTemporaryFile
+
+    # We set buffering=0, because by default file.name may be
+    # an empty file when opened by _gpg.verify
+    with NamedTemporaryFile(buffering=0) as file:
+        file.write(data)
+        verify = _gpg.verify(signature, data_filename=file.name)
+
+    return bool(verify)
