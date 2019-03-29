@@ -4,7 +4,7 @@ import logging
 import time
 import traceback
 from typing import Any, AnyStr, Dict, \
-    Iterable, List, MutableMapping, Optional
+    Iterable, List, MutableMapping, Optional, Callable
 
 from bs4 import BeautifulSoup
 from django.conf import settings
@@ -321,8 +321,17 @@ def csrf_failure(request: HttpRequest, reason: str="") -> HttpResponse:
     else:
         return html_csrf_failure(request, reason)
 
-class RateLimitMiddleware(MiddlewareMixin):
-    def process_response(self, request: HttpRequest, response: HttpResponse) -> HttpResponse:
+class RateLimitMiddleware:
+    def __init__(self, get_response: Optional[Callable[[HttpRequest], HttpResponse]]=None) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        response = self.user_ratelimiting_process_response(request)
+        return response
+
+    def user_ratelimiting_process_response(self, request: HttpRequest) -> HttpResponse:
+        assert self.get_response is not None
+        response = self.get_response(request)
         if not settings.RATE_LIMITING:
             return response
 
@@ -338,6 +347,7 @@ class RateLimitMiddleware(MiddlewareMixin):
         return response
 
     def process_exception(self, request: HttpRequest, exception: Exception) -> Optional[HttpResponse]:
+        # Catch RateLimited exception coming from views with the rate-limiting decorator
         if isinstance(exception, RateLimited):
             resp = json_error(
                 _("API usage exceeded rate limit"),
