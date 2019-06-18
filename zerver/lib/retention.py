@@ -9,7 +9,7 @@ from django.utils.timezone import now as timezone_now
 from zerver.lib.logging_util import log_to_file
 from zerver.models import (Message, UserMessage, ArchivedMessage, ArchivedUserMessage, Realm,
                            Attachment, ArchivedAttachment, Reaction, ArchivedReaction,
-                           SubMessage, ArchivedSubMessage, Recipient, Stream,
+                           SubMessage, ArchivedSubMessage, Recipient, Stream, ArchiveTransaction,
                            get_stream_recipients, get_user_including_cross_realm)
 
 from typing import Any, Dict, Iterator, List
@@ -51,7 +51,6 @@ def move_rows(src_model: Any, raw_query: str, returning_id: bool=False,
     sql_args = {
         'src_fields': ','.join(src_fields),
         'dst_fields': ','.join(dst_fields),
-        'archive_timestamp': timezone_now()
     }
     sql_args.update(kwargs)
     with connection.cursor() as cursor:
@@ -96,8 +95,8 @@ def move_expired_messages_to_archive_by_recipient(recipient: Recipient,
     # Important: This function is a generator, and you need to iterate
     # through the Iterator it returns to execute the queries.
     query = """
-    INSERT INTO zerver_archivedmessage ({dst_fields}, archive_timestamp)
-        SELECT {src_fields}, '{archive_timestamp}'
+    INSERT INTO zerver_archivedmessage ({dst_fields})
+        SELECT {src_fields}
         FROM zerver_message
         LEFT JOIN zerver_archivedmessage ON zerver_archivedmessage.id = zerver_message.id
         WHERE zerver_message.recipient_id = {recipient_id}
@@ -126,8 +125,8 @@ def move_expired_personal_and_huddle_messages_to_archive(realm: Realm,
     # TODO: Remove the "zerver_userprofile.id NOT IN {cross_realm_bot_ids}" clause
     # once https://github.com/zulip/zulip/issues/11015 is solved.
     query = """
-    INSERT INTO zerver_archivedmessage ({dst_fields}, archive_timestamp)
-        SELECT {src_fields}, '{archive_timestamp}'
+    INSERT INTO zerver_archivedmessage ({dst_fields})
+        SELECT {src_fields}
         FROM zerver_message
         INNER JOIN zerver_recipient ON zerver_recipient.id = zerver_message.recipient_id
         INNER JOIN zerver_userprofile ON zerver_userprofile.id = zerver_message.sender_id
@@ -147,14 +146,15 @@ def move_expired_personal_and_huddle_messages_to_archive(realm: Realm,
                                        realm_id=realm.id, recipient_types=recipient_types,
                                        check_date=check_date.isoformat(), chunk_size=chunk_size)
 
-def move_to_archive_and_delete_models_with_message_key(msg_ids: List[int]) -> None:
+def move_to_archive_and_delete_models_with_message_key(msg_ids: List[int],
+                                                       archive_transaction_id: int) -> None:
     assert len(msg_ids) > 0
 
     for model in models_with_message_key:
         query = """
         WITH archived_data AS (
-            INSERT INTO {archive_table_name} ({dst_fields}, archive_timestamp)
-            SELECT {src_fields}, '{archive_timestamp}'
+            INSERT INTO {archive_table_name} ({dst_fields}, archive_transaction_id)
+            SELECT {src_fields}, {archive_transaction_id}
             FROM {table_name}
             LEFT JOIN {archive_table_name} ON {archive_table_name}.id = {table_name}.id
             WHERE {table_name}.message_id IN {message_ids}
@@ -165,15 +165,16 @@ def move_to_archive_and_delete_models_with_message_key(msg_ids: List[int]) -> No
         WHERE id IN (SELECT id FROM archived_data)
         """
         move_rows(model['class'], query, table_name=model['table_name'],
+                  archive_transaction_id=archive_transaction_id,
                   archive_table_name=model['archive_table_name'],
                   message_ids=ids_list_to_sql_query_format(msg_ids))
 
-def move_attachments_to_archive(msg_ids: List[int]) -> None:
+def move_attachments_to_archive(msg_ids: List[int], archive_transaction_id: int) -> None:
     assert len(msg_ids) > 0
 
     query = """
-       INSERT INTO zerver_archivedattachment ({dst_fields}, archive_timestamp)
-       SELECT {src_fields}, '{archive_timestamp}'
+       INSERT INTO zerver_archivedattachment ({dst_fields}, archive_transaction_id)
+       SELECT {src_fields}, {archive_transaction_id}
        FROM zerver_attachment
        INNER JOIN zerver_attachment_messages
            ON zerver_attachment_messages.attachment_id = zerver_attachment.id
@@ -182,7 +183,8 @@ def move_attachments_to_archive(msg_ids: List[int]) -> None:
             AND zerver_archivedattachment.id IS NULL
        GROUP BY zerver_attachment.id
     """
-    move_rows(Attachment, query, message_ids=ids_list_to_sql_query_format(msg_ids))
+    move_rows(Attachment, query, archive_transaction_id=archive_transaction_id,
+              message_ids=ids_list_to_sql_query_format(msg_ids))
 
 
 def move_attachment_messages_to_archive(msg_ids: List[int]) -> None:
@@ -221,9 +223,9 @@ def delete_expired_attachments(realm: Realm) -> None:
         id__in=ArchivedAttachment.objects.filter(realm_id=realm.id),
     ).delete()
 
-def move_related_objects_to_archive(msg_ids: List[int]) -> None:
-    move_to_archive_and_delete_models_with_message_key(msg_ids)
-    move_attachments_to_archive(msg_ids)
+def move_related_objects_to_archive(msg_ids: List[int], archive_transaction_id: int) -> None:
+    move_to_archive_and_delete_models_with_message_key(msg_ids, archive_transaction_id)
+    move_attachments_to_archive(msg_ids, archive_transaction_id)
     move_attachment_messages_to_archive(msg_ids)
 
 def run_archiving_in_chunks(message_id_chunks: Iterator[List[int]]) -> int:
@@ -244,7 +246,10 @@ def run_archiving_in_chunks(message_id_chunks: Iterator[List[int]]) -> int:
             except StopIteration:
                 break
 
-            move_related_objects_to_archive(chunk)
+            archive_transaction = ArchiveTransaction.objects.create()
+            ArchivedMessage.objects.filter(id__in=chunk).update(archive_transaction=archive_transaction)
+
+            move_related_objects_to_archive(chunk, archive_transaction.id)
             delete_messages(chunk)
             message_count += len(chunk)
 
@@ -306,9 +311,11 @@ def move_messages_to_archive(message_ids: List[int]) -> None:
     if not messages:
         raise Message.DoesNotExist
 
-    ArchivedMessage.objects.bulk_create([ArchivedMessage(**message) for message in messages])
+    archive_transaction = ArchiveTransaction.objects.create()
+    ArchivedMessage.objects.bulk_create([ArchivedMessage(archive_transaction=archive_transaction,
+                                                         **message) for message in messages])
 
-    move_related_objects_to_archive(message_ids)
+    move_related_objects_to_archive(message_ids, archive_transaction.id)
     # Remove data from main tables
     delete_messages(message_ids)
 
