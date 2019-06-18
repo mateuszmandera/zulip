@@ -248,6 +248,11 @@ def run_archiving_in_chunks(message_id_chunks: Iterator[List[int]]) -> int:
 
             archive_transaction = ArchiveTransaction.objects.create()
             ArchivedMessage.objects.filter(id__in=chunk).update(archive_transaction=archive_transaction)
+            logger.info(
+                "Processing {} messages in transaction id: {}, timestamp {}".format(
+                    len(chunk), archive_transaction.id, archive_transaction.archive_timestamp
+                )
+            )
 
             move_related_objects_to_archive(chunk, archive_transaction.id)
             delete_messages(chunk)
