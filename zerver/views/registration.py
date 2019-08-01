@@ -232,7 +232,7 @@ def accounts_register(request: HttpRequest) -> HttpResponse:
             # But if the realm is using LDAPAuthBackend, we need to verify
             # their LDAP password (which will, as a side effect, create
             # the user account) here using authenticate.
-            auth_result = authenticate(request,
+            auth_result = authenticate(request=request,
                                        username=email,
                                        password=password,
                                        realm=realm,
