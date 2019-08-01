@@ -18,6 +18,7 @@ from jinja2 import Markup as mark_safe
 from zerver.lib.actions import do_change_password, email_not_system_bot, \
     validate_email_for_realm
 from zerver.lib.name_restrictions import is_reserved_subdomain, is_disposable_domain
+from zerver.lib.rate_limiter import RateLimited
 from zerver.lib.request import JsonableError
 from zerver.lib.send_email import send_email, FromAddress
 from zerver.lib.subdomains import get_subdomain, is_root_domain_available
@@ -45,6 +46,9 @@ WRONG_SUBDOMAIN_ERROR = "Your Zulip account is not a member of the " + \
                         "Please contact your organization administrator with any questions."
 DEACTIVATED_ACCOUNT_ERROR = u"Your account is no longer active. " + \
                             u"Please contact your organization administrator to reactivate it."
+AUTHENTICATION_RATE_LIMITED_ERROR = "You're making too many attempts to sign in. " + \
+                                    "Try again in {} seconds or contact your organization administrator " + \
+                                    "for help."
 
 def email_is_not_mit_mailing_list(email: str) -> None:
     """Prevent MIT mailing lists from signing up for Zulip"""
@@ -287,8 +291,15 @@ class OurAuthenticationForm(AuthenticationForm):
                 raise ValidationError("Realm does not exist")
 
             return_data = {}  # type: Dict[str, Any]
-            self.user_cache = authenticate(request=self.request, username=username, password=password,
-                                           realm=realm, return_data=return_data)
+            try:
+                self.user_cache = authenticate(request=self.request, username=username, password=password,
+                                               realm=realm, return_data=return_data)
+            except RateLimited as exception:
+                entity_type = str(exception)  # entity type is passed to RateLimited when raising
+                secs_to_freedom = self.request._ratelimit[entity_type]['secs_to_freedom']
+                raise ValidationError(
+                    mark_safe(AUTHENTICATION_RATE_LIMITED_ERROR.format(secs_to_freedom))
+                )
 
             if return_data.get("inactive_realm"):
                 raise AssertionError("Programming error: inactive realm in authentication form")

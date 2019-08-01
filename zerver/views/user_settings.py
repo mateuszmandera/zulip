@@ -19,6 +19,7 @@ from zerver.lib.i18n import get_available_language_codes
 from zerver.lib.response import json_success, json_error
 from zerver.lib.upload import upload_avatar_image
 from zerver.lib.validator import check_bool, check_string, check_int
+from zerver.lib.rate_limiter import RateLimited
 from zerver.lib.request import JsonableError
 from zerver.lib.timezone import get_all_timezones
 from zerver.models import UserProfile, name_changes_disabled, avatar_changes_disabled
@@ -68,9 +69,12 @@ def json_change_settings(request: HttpRequest, user_profile: UserProfile,
         return_data = {}  # type: Dict[str, Any]
         if email_belongs_to_ldap(user_profile.realm, user_profile.delivery_email):
             return json_error(_("Your Zulip password is managed in LDAP"))
-        if not authenticate(request=request, username=user_profile.delivery_email, password=old_password,
-                            realm=user_profile.realm, return_data=return_data):
-            return json_error(_("Wrong password!"))
+        try:
+            if not authenticate(request, username=user_profile.delivery_email, password=old_password,
+                                realm=user_profile.realm, return_data=return_data):
+                return json_error(_("Wrong password!"))
+        except RateLimited:
+            return json_error(_("You're making too many attempts! Try again later."))
         do_change_password(user_profile, new_password)
         # In Django 1.10, password changes invalidates sessions, see
         # https://docs.djangoproject.com/en/1.10/topics/auth/default/#session-invalidation-on-password-change
