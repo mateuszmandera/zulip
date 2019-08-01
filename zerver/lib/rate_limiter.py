@@ -4,7 +4,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 from django.conf import settings
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from zerver.lib.exceptions import RateLimited
 from zerver.lib.redis_utils import get_redis_client
 from zerver.lib.utils import statsd
@@ -276,10 +276,11 @@ def rate_limit_request_by_entity(request: HttpRequest, entity: RateLimitedObject
     entity_type = type(entity).__name__
     if not hasattr(request, '_ratelimit'):
         request._ratelimit = {}
-    request._ratelimit[entity_type] = {}
-    request._ratelimit[entity_type]['applied_limits'] = True
-    request._ratelimit[entity_type]['secs_to_freedom'] = time
-    request._ratelimit[entity_type]['over_limit'] = ratelimited
+    request._ratelimit[entity_type] = RateLimitResult(
+        entity=entity,
+        secs_to_freedom=time,
+        over_limit=ratelimited
+    )
     # Abort this request if the user is over their rate limits
     if ratelimited:
         # Pass information about what kind of entity got limited in the exception:
@@ -287,5 +288,31 @@ def rate_limit_request_by_entity(request: HttpRequest, entity: RateLimitedObject
 
     calls_remaining, time_reset = api_calls_left(entity)
 
-    request._ratelimit[entity_type]['remaining'] = calls_remaining
-    request._ratelimit[entity_type]['secs_to_freedom'] = time_reset
+    request._ratelimit[entity_type].remaining = calls_remaining
+    request._ratelimit[entity_type].secs_to_freedom = time_reset
+
+class RateLimitResult:
+    def __init__(self, entity: RateLimitedObject, secs_to_freedom: float, over_limit: bool,
+                 remaining: Optional[int]=None) -> None:
+        if over_limit:
+            assert not remaining
+
+        self.entity = entity
+        self.secs_to_freedom = secs_to_freedom
+        self.over_limit = over_limit
+        self.remaining = remaining
+
+def set_response_headers(response: HttpResponse, rate_limit_results: List[RateLimitResult]) -> None:
+    # The limit on the action that was requested is the minimum of the limits that get applied:
+    limit = min([max_api_calls(result.entity) for result in rate_limit_results])
+    response['X-RateLimit-Limit'] = str(limit)
+    # Same principle applies to remaining api calls:
+    if all(result.remaining for result in rate_limit_results):
+        remaining_api_calls = min([result.remaining for result in rate_limit_results])
+        response['X-RateLimit-Remaining'] = str(remaining_api_calls)
+    else:
+        response['X-RateLimit-Remaining'] = str(0)
+
+    # The full reset time is the maximum of the reset times for the limits that get applied:
+    reset_time = time.time() + max([result.secs_to_freedom for result in rate_limit_results])
+    response['X-RateLimit-Reset'] = str(int(reset_time))

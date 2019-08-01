@@ -26,6 +26,7 @@ from zerver.lib.db import reset_queries
 from zerver.lib.exceptions import ErrorCode, JsonableError, RateLimited
 from zerver.lib.html_to_text import get_content_description
 from zerver.lib.queue import queue_json_publish
+from zerver.lib.rate_limiter import set_response_headers as rate_limiter_set_response_headers
 from zerver.lib.response import json_error, json_response_from_error
 from zerver.lib.subdomains import get_subdomain
 from zerver.lib.utils import statsd
@@ -326,16 +327,11 @@ class RateLimitMiddleware(MiddlewareMixin):
         if not settings.RATE_LIMITING:
             return response
 
-        from zerver.lib.rate_limiter import max_api_calls, RateLimitedUser
         # Add X-RateLimit-*** headers
         if hasattr(request, '_ratelimit'):
-            # Right now, the only kind of limiting requests is user-based.
-            ratelimit_user_results = request._ratelimit['RateLimitedUser']
-            entity = RateLimitedUser(request.user)
-            response['X-RateLimit-Limit'] = str(max_api_calls(entity))
-            response['X-RateLimit-Reset'] = str(int(time.time() + ratelimit_user_results['secs_to_freedom']))
-            if 'remaining' in ratelimit_user_results:
-                response['X-RateLimit-Remaining'] = str(ratelimit_user_results['remaining'])
+            rate_limit_results = list(request._ratelimit.values())
+            rate_limiter_set_response_headers(response, rate_limit_results)
+
         return response
 
     # TODO: When we have Django stubs, we should be able to fix the
@@ -348,10 +344,10 @@ class RateLimitMiddleware(MiddlewareMixin):
             entity_type = str(exception)  # entity type is passed to RateLimited when raising
             resp = json_error(
                 _("API usage exceeded rate limit"),
-                data={'retry-after': request._ratelimit[entity_type]['secs_to_freedom']},
+                data={'retry-after': request._ratelimit[entity_type].secs_to_freedom},
                 status=429
             )
-            resp['Retry-After'] = request._ratelimit[entity_type]['secs_to_freedom']
+            resp['Retry-After'] = request._ratelimit[entity_type].secs_to_freedom
             return resp
         return None
 
