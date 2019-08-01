@@ -30,9 +30,11 @@ from zerver.lib.actions import (
 from zerver.lib.avatar import avatar_url
 from zerver.lib.avatar_hash import user_avatar_path
 from zerver.lib.dev_ldap_directory import generate_dev_ldap_dir
+from zerver.lib.exceptions import RateLimited
 from zerver.lib.mobile_auth_otp import otp_decrypt_api_key
 from zerver.lib.validator import validate_login_email, \
     check_bool, check_dict_only, check_string, Validator
+from zerver.lib.rate_limiter import add_ratelimit_rule, remove_ratelimit_rule
 from zerver.lib.request import JsonableError
 from zerver.lib.storage import static_path
 from zerver.lib.users import get_all_api_keys
@@ -174,13 +176,15 @@ class AuthBackendTest(ZulipTestCase):
         password = "testpassword"
         user_profile.set_password(password)
         user_profile.save()
+        request = mock.MagicMock()
 
         with mock.patch('zproject.backends.email_auth_enabled',
                         return_value=False), \
                 mock.patch('zproject.backends.password_auth_enabled',
                            return_value=True):
             return_data = {}  # type: Dict[str, bool]
-            user = EmailAuthBackend().authenticate(username=self.example_email('hamlet'),
+            user = EmailAuthBackend().authenticate(request=request,
+                                                   username=self.example_email('hamlet'),
                                                    realm=get_realm("zulip"),
                                                    password=password,
                                                    return_data=return_data)
@@ -188,32 +192,84 @@ class AuthBackendTest(ZulipTestCase):
             self.assertTrue(return_data['email_auth_disabled'])
 
         self.verify_backend(EmailAuthBackend(),
-                            good_kwargs=dict(password=password,
+                            good_kwargs=dict(request=request,
+                                             password=password,
                                              username=username,
                                              realm=get_realm('zulip'),
                                              return_data=dict()),
-                            bad_kwargs=dict(password=password,
+                            bad_kwargs=dict(request=request,
+                                            password=password,
                                             username=username,
                                             realm=get_realm('zephyr'),
                                             return_data=dict()))
         self.verify_backend(EmailAuthBackend(),
-                            good_kwargs=dict(password=password,
+                            good_kwargs=dict(request=request,
+                                             password=password,
                                              username=username,
                                              realm=get_realm('zulip'),
                                              return_data=dict()),
-                            bad_kwargs=dict(password=password,
+                            bad_kwargs=dict(request=request,
+                                            password=password,
                                             username=username,
                                             realm=get_realm('zephyr'),
                                             return_data=dict()))
+
+    @override_settings(RATE_LIMITING_AUTHENTICATE=True)
+    def test_email_auth_backend_user_based_rate_limiting(self) -> None:
+        add_ratelimit_rule(10, 2, domain='authenticate')
+
+        user_profile = self.example_user('hamlet')
+        password = "testpassword"
+        user_profile.set_password(password)
+        user_profile.save()
+
+        def attempt_authentication(password: str='wrong_pass') -> None:
+            request = mock.MagicMock()
+            EmailAuthBackend().authenticate(request=request,
+                                            username=self.example_email('hamlet'),
+                                            realm=get_realm("zulip"),
+                                            password=password,
+                                            return_data=dict())
+
+        with mock.patch.object(UserProfile, 'check_password', return_value=False) as mock_check_password:
+            start_time = time.time()
+            with mock.patch('time.time', return_value=start_time):
+                attempt_authentication()
+                attempt_authentication()
+                self.assertEqual(mock_check_password.call_count, 2)
+                # 2 failed attempts is the limit, so the next one should get blocked:
+                with self.assertRaises(RateLimited):
+                    attempt_authentication()
+
+        # After enough time passes, more authentication attempts can be made:
+        with mock.patch('time.time', return_value=start_time+11.0):
+            with mock.patch.object(UserProfile, 'check_password', return_value=False) as mock_check_password:
+                attempt_authentication()
+                self.assertEqual(mock_check_password.call_count, 1)
+
+            attempt_authentication(password)  # Correct password
+            # A correct login attempt should reset the rate limits for this user profile,
+            # so the next two attempts shouldn't get limited:
+            with mock.patch.object(UserProfile, 'check_password', return_value=False) as mock_check_password:
+                attempt_authentication()
+                attempt_authentication()
+                self.assertEqual(mock_check_password.call_count, 2)
+                # But the third attempt goes over the limit:
+                with self.assertRaises(RateLimited):
+                    attempt_authentication()
+
+        remove_ratelimit_rule(10, 2, domain='authenticate')
 
     def test_email_auth_backend_disabled_password_auth(self) -> None:
         user_profile = self.example_user('hamlet')
         password = "testpassword"
         user_profile.set_password(password)
         user_profile.save()
+        request = mock.MagicMock()
         # Verify if a realm has password auth disabled, correct password is rejected
         with mock.patch('zproject.backends.password_auth_enabled', return_value=False):
-            self.assertIsNone(EmailAuthBackend().authenticate(username=self.example_email('hamlet'),
+            self.assertIsNone(EmailAuthBackend().authenticate(request=request,
+                                                              username=self.example_email('hamlet'),
                                                               password=password,
                                                               realm=get_realm("zulip")))
 
@@ -269,6 +325,7 @@ class AuthBackendTest(ZulipTestCase):
 
         username = self.get_username()
         backend = ZulipLDAPAuthBackend()
+        request = mock.MagicMock()
 
         # Test LDAP auth fails when LDAP server rejects password
         with mock.patch('django_auth_ldap.backend._LDAPUser._authenticate_user_dn',
@@ -276,24 +333,30 @@ class AuthBackendTest(ZulipTestCase):
             mock.patch('django_auth_ldap.backend._LDAPUser._check_requirements')), (
             mock.patch('django_auth_ldap.backend._LDAPUser.attrs',
                        return_value=dict(full_name=['Hamlet']))):
-            self.assertIsNone(backend.authenticate(username=email, password=password, realm=get_realm("zulip")))
+            self.assertIsNone(backend.authenticate(
+                request=request, username=email, password=password, realm=get_realm("zulip")
+            ))
 
         with mock.patch('django_auth_ldap.backend._LDAPUser._authenticate_user_dn'), (
             mock.patch('django_auth_ldap.backend._LDAPUser._check_requirements')), (
             mock.patch('django_auth_ldap.backend._LDAPUser.attrs',
                        return_value=dict(full_name=['Hamlet']))):
             self.verify_backend(backend,
-                                bad_kwargs=dict(username=username,
+                                bad_kwargs=dict(request=request,
+                                                username=username,
                                                 password=password,
                                                 realm=get_realm('zephyr')),
-                                good_kwargs=dict(username=username,
+                                good_kwargs=dict(request=request,
+                                                 username=username,
                                                  password=password,
                                                  realm=get_realm('zulip')))
             self.verify_backend(backend,
-                                bad_kwargs=dict(username=username,
+                                bad_kwargs=dict(request=request,
+                                                username=username,
                                                 password=password,
                                                 realm=get_realm('zephyr')),
-                                good_kwargs=dict(username=username,
+                                good_kwargs=dict(request=request,
+                                                 username=username,
                                                  password=password,
                                                  realm=get_realm('zulip')))
 
@@ -2198,7 +2261,8 @@ class TestLDAP(ZulipLDAPTestCase):
                 LDAP_APPEND_DOMAIN='zulip.com',
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com'):
-            user_profile = self.backend.authenticate(username='ldapuser1', password='dapu',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(),
+                                                     username='ldapuser1', password='dapu',
                                                      realm=get_realm('zulip'))
 
             assert(user_profile is None)
@@ -2214,7 +2278,9 @@ class TestLDAP(ZulipLDAPTestCase):
                 LDAP_APPEND_DOMAIN='zulip.com',
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com'):
-            user_profile = self.backend.authenticate(username=self.example_email("hamlet"), password='testing',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(),
+                                                     username=self.example_email("hamlet"),
+                                                     password='testing',
                                                      realm=get_realm('zulip'))
 
             assert(user_profile is not None)
@@ -2231,7 +2297,8 @@ class TestLDAP(ZulipLDAPTestCase):
                 LDAP_APPEND_DOMAIN='zulip.com',
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com'):
-            user_profile = self.backend.authenticate(username="hamlet", password='testing',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(),
+                                                     username="hamlet", password='testing',
                                                      realm=get_realm('zulip'))
 
             assert(user_profile is not None)
@@ -2248,7 +2315,8 @@ class TestLDAP(ZulipLDAPTestCase):
         with self.settings(LDAP_EMAIL_ATTR='email',
                            AUTH_LDAP_BIND_PASSWORD='',
                            AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com'):
-            user_profile = self.backend.authenticate(username="letham", password='testing',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(),
+                                                     username="letham", password='testing',
                                                      realm=get_realm('zulip'))
 
             assert (user_profile is not None)
@@ -2265,7 +2333,8 @@ class TestLDAP(ZulipLDAPTestCase):
                 LDAP_APPEND_DOMAIN='zulip.com',
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com'):
-            user = self.backend.authenticate(username=self.example_email("hamlet"), password='wrong',
+            user = self.backend.authenticate(request=mock.MagicMock(),
+                                             username=self.example_email("hamlet"), password='wrong',
                                              realm=get_realm('zulip'))
             self.assertIs(user, None)
 
@@ -2280,7 +2349,8 @@ class TestLDAP(ZulipLDAPTestCase):
                 LDAP_APPEND_DOMAIN='zulip.com',
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com'):
-            user = self.backend.authenticate(username='nonexistent@zulip.com', password='testing',
+            user = self.backend.authenticate(request=mock.MagicMock(),
+                                             username='nonexistent@zulip.com', password='testing',
                                              realm=get_realm('zulip'))
             self.assertIs(user, None)
 
@@ -2437,7 +2507,7 @@ class TestLDAP(ZulipLDAPTestCase):
     @override_settings(AUTHENTICATION_BACKENDS=('zproject.backends.ZulipLDAPAuthBackend',))
     def test_login_failure_when_domain_does_not_match(self) -> None:
         with self.settings(LDAP_APPEND_DOMAIN='acme.com'):
-            user_profile = self.backend.authenticate(username=self.example_email("hamlet"), password='pass',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(), username=self.example_email("hamlet"), password='pass',
                                                      realm=get_realm('zulip'))
             self.assertIs(user_profile, None)
 
@@ -2458,7 +2528,9 @@ class TestLDAP(ZulipLDAPTestCase):
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com',
                 AUTH_LDAP_USER_ATTR_MAP=ldap_user_attr_map):
-            user_profile = self.backend.authenticate(username=self.example_email('hamlet'), password='testing',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(),
+                                                     username=self.example_email('hamlet'),
+                                                     password='testing',
                                                      realm=get_realm('acme'))
             self.assertEqual(user_profile.email, self.example_email('hamlet'))
 
@@ -2473,7 +2545,9 @@ class TestLDAP(ZulipLDAPTestCase):
                 LDAP_APPEND_DOMAIN='zulip.com',
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com'):
-            user_profile = self.backend.authenticate(username=self.example_email("hamlet"), password='testing',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(),
+                                                     username=self.example_email("hamlet"),
+                                                     password='testing',
                                                      realm=get_realm('zulip'))
             assert(user_profile is not None)
             self.assertEqual(user_profile.email, self.example_email("hamlet"))
@@ -2491,7 +2565,9 @@ class TestLDAP(ZulipLDAPTestCase):
                 LDAP_APPEND_DOMAIN='zulip.com',
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com'):
-            user_profile = self.backend.authenticate(username=self.example_email("hamlet"), password='testing',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(),
+                                                     username=self.example_email("hamlet"),
+                                                     password='testing',
                                                      realm=get_realm('zulip'))
             self.assertIs(user_profile, None)
 
@@ -2513,7 +2589,9 @@ class TestLDAP(ZulipLDAPTestCase):
                 LDAP_APPEND_DOMAIN='acme.com',
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=acme,dc=com'):
-            user_profile = self.backend.authenticate(username='nonexisting@acme.com', password='testing',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(),
+                                                     username='nonexisting@acme.com',
+                                                     password='testing',
                                                      realm=get_realm('zulip'))
             assert(user_profile is not None)
             self.assertEqual(user_profile.email, 'nonexisting@acme.com')
@@ -2539,7 +2617,9 @@ class TestLDAP(ZulipLDAPTestCase):
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com',
                 AUTH_LDAP_USER_ATTR_MAP={'first_name': 'fn', 'last_name': 'ln'}):
-            user_profile = self.backend.authenticate(username='nonexisting@zulip.com', password='testing',
+            user_profile = self.backend.authenticate(request=mock.MagicMock(),
+                                                     username='nonexisting@zulip.com',
+                                                     password='testing',
                                                      realm=get_realm('zulip'))
             assert(user_profile is not None)
             self.assertEqual(user_profile.email, 'nonexisting@zulip.com')

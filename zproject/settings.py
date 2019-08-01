@@ -234,6 +234,7 @@ DEFAULT_SETTINGS = {
     'PUSH_NOTIFICATION_REDACT_CONTENT': False,
     'SUBMIT_USAGE_STATISTICS': True,
     'RATE_LIMITING': True,
+    'RATE_LIMITING_AUTHENTICATE': True,
     'SEND_LOGIN_EMAILS': True,
     'EMBEDDED_BOTS_ENABLED': False,
 
@@ -698,6 +699,9 @@ CACHES = {
 RATE_LIMITING_RULES = {
     'all': [
         (60, 200),  # 200 requests max every minute
+    ],
+    'authenticate': [
+        (1800, 5),  # 5 login attempts within 30 minutes
     ],
 }
 
