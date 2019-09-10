@@ -485,18 +485,6 @@ class DigestWorker(QueueProcessingWorker):  # nocoverage
 class MirrorWorker(QueueProcessingWorker):
     def consume(self, event: Mapping[str, Any]) -> None:
         rcpt_to = event['rcpt_to']
-        if not is_missed_message_address(rcpt_to):
-            # Missed message addresses are one-time use, so we don't need
-            # to worry about emails to them resulting in message spam.
-            recipient_realm = extract_and_validate(rcpt_to)[0].realm
-            try:
-                rate_limit_mirror_by_realm(recipient_realm)
-            except RateLimited:
-                msg = email.message_from_string(event["message"])
-                logger.warning("MirrorWorker: Rejecting an email from: %s "
-                               "to realm: %s - rate limited."
-                               % (msg['From'], recipient_realm.name))
-                return
 
         mirror_email(email.message_from_string(event["message"]),
                      rcpt_to=rcpt_to, pre_checked=True)
