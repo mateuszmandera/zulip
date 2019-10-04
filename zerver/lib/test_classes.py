@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from email.utils import parseaddr
+from fakeldap import MockLDAP
 from typing import (cast, Any, Dict, Iterable, Iterator, List, Optional,
                     Tuple, Union, Set)
 
@@ -62,7 +63,10 @@ from zilencer.models import get_remote_server_by_uuid
 from zerver.decorator import do_two_factor_login
 from zerver.tornado.event_queue import clear_client_event_queues_for_testing
 
+from django_auth_ldap.config import LDAPSearch
+
 import base64
+import ldap
 import mock
 import os
 import re
@@ -850,3 +854,51 @@ class MigrationsTestCase(ZulipTestCase):  # nocoverage
 
     def setUpBeforeMigration(self, apps: StateApps) -> None:
         pass  # nocoverage
+
+class LDAPTestCase(ZulipTestCase):
+    def setUp(self) -> None:
+        directory = ujson.loads(self.fixture_data("directory.json", type="ldap"))
+
+        # Load binary attributes. If in "directory", an attribute as its value
+        # has a string starting with "file:", the rest of the string is assumed
+        # to be a path to the file from which binary data should be loaded,
+        # as the actual value of the attribute in ldap.
+        for dn, attrs in directory.items():
+            for attr, value in attrs.items():
+                if isinstance(value, str) and value.startswith("file:"):
+                    with open(value[5:], 'rb') as f:
+                        attrs[attr] = [f.read(), ]
+
+        ldap_patcher = mock.patch('django_auth_ldap.config.ldap.initialize')
+        self.mock_initialize = ldap_patcher.start()
+        self.mock_ldap = MockLDAP(directory)
+        self.mock_initialize.return_value = self.mock_ldap
+
+    def tearDown(self) -> None:
+        self.mock_ldap.reset()
+        self.mock_initialize.stop()
+
+    def settings(self, **kwargs: Any) -> Any:
+        """
+        Extend self.settings for LDAP tests to set various LDAP defaults if not explicitly specified:
+        The server URI, and how to find users by username or email.
+        """
+        if "AUTH_LDAP_USER_SEARCH" not in kwargs:
+            kwargs["AUTH_LDAP_USER_SEARCH"] = LDAPSearch("ou=users,dc=zulip,dc=com",
+                                                         ldap.SCOPE_ONELEVEL, "(uid=%(user)s)")
+        settings_kwargs = {}  # type: Dict[str, Any]
+        for key, value in kwargs.items():
+            settings_kwargs[key] = value
+        return super().settings(**settings_kwargs)
+
+    def change_user_attr(self, username: str, attr_name: str, attr_value: Union[str, bytes],
+                         binary: bool=False) -> None:
+        dn = "uid={username},ou=users,dc=zulip,dc=com".format(username=username)
+        if binary:
+            with open(attr_value, "rb") as f:
+                # attr_value should be a path to the file with the binary data
+                data = f.read()  # type: Union[str, bytes]
+        else:
+            data = attr_value
+
+        self.mock_ldap.directory[dn][attr_name] = [data, ]
