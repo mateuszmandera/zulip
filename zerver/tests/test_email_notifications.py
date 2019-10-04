@@ -47,6 +47,28 @@ class TestFollowupEmails(ZulipTestCase):
                          "http://zulip.testserver/help/getting-your-organization-started-with-zulip")
         self.assertNotIn("ldap_username", email_data["context"])
 
+    def test_followup_emails_count(self) -> None:
+        hamlet = self.example_user("hamlet")
+        cordelia = self.example_user("cordelia")
+
+        enqueue_welcome_emails(self.example_user("hamlet"))
+        # Hamlet has account only in Zulip realm so both day1 and day2 emails should be sent
+        scheduled_emails = ScheduledEmail.objects.filter(users=hamlet).order_by(
+            "scheduled_timestamp")
+        self.assertEqual(2, len(scheduled_emails))
+        self.assertEqual(ujson.loads(scheduled_emails[1].data)["template_prefix"], 'zerver/emails/followup_day2')
+        self.assertEqual(ujson.loads(scheduled_emails[0].data)["template_prefix"], 'zerver/emails/followup_day1')
+
+        ScheduledEmail.objects.all().delete()
+
+        enqueue_welcome_emails(cordelia)
+        scheduled_emails = ScheduledEmail.objects.filter(users=cordelia)
+        # Cordelia has account in more than 1 realm so day2 email should not be sent
+        self.assertEqual(len(scheduled_emails), 1)
+        email_data = ujson.loads(scheduled_emails[0].data)
+        self.assertEqual(email_data["template_prefix"], 'zerver/emails/followup_day1')
+
+class TestFollowupEmailsLDAP(ZulipTestCase):
     # See https://zulip.readthedocs.io/en/latest/production/authentication-methods.html#ldap-including-active-directory
     # for case details.
     @override_settings(AUTHENTICATION_BACKENDS=('zproject.backends.ZulipLDAPAuthBackend',
@@ -145,27 +167,6 @@ class TestFollowupEmails(ZulipTestCase):
             email_data = ujson.loads(scheduled_emails[0].data)
             self.assertEqual(email_data["context"]["ldap"], True)
             self.assertNotIn("ldap_username", email_data["context"])
-
-    def test_followup_emails_count(self) -> None:
-        hamlet = self.example_user("hamlet")
-        cordelia = self.example_user("cordelia")
-
-        enqueue_welcome_emails(self.example_user("hamlet"))
-        # Hamlet has account only in Zulip realm so both day1 and day2 emails should be sent
-        scheduled_emails = ScheduledEmail.objects.filter(users=hamlet).order_by(
-            "scheduled_timestamp")
-        self.assertEqual(2, len(scheduled_emails))
-        self.assertEqual(ujson.loads(scheduled_emails[1].data)["template_prefix"], 'zerver/emails/followup_day2')
-        self.assertEqual(ujson.loads(scheduled_emails[0].data)["template_prefix"], 'zerver/emails/followup_day1')
-
-        ScheduledEmail.objects.all().delete()
-
-        enqueue_welcome_emails(cordelia)
-        scheduled_emails = ScheduledEmail.objects.filter(users=cordelia)
-        # Cordelia has account in more than 1 realm so day2 email should not be sent
-        self.assertEqual(len(scheduled_emails), 1)
-        email_data = ujson.loads(scheduled_emails[0].data)
-        self.assertEqual(email_data["template_prefix"], 'zerver/emails/followup_day1')
 
 class TestMissedMessages(ZulipTestCase):
     def normalize_string(self, s: str) -> str:

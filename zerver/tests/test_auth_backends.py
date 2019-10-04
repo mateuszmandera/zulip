@@ -1701,6 +1701,21 @@ class FetchAPIKeyTest(ZulipTestCase):
                                            password=initial_password(self.email)))
             self.assert_json_error_contains(result, "Password auth is disabled", 403)
 
+    def test_inactive_user(self) -> None:
+        do_deactivate_user(self.user_profile)
+        result = self.client_post("/api/v1/fetch_api_key",
+                                  dict(username=self.email,
+                                       password=initial_password(self.email)))
+        self.assert_json_error_contains(result, "Your account has been disabled", 403)
+
+    def test_deactivated_realm(self) -> None:
+        do_deactivate_realm(self.user_profile.realm)
+        result = self.client_post("/api/v1/fetch_api_key",
+                                  dict(username=self.email,
+                                       password=initial_password(self.email)))
+        self.assert_json_error_contains(result, "This organization has been deactivated", 403)
+
+class FetchAPIKeyLDAPTest(ZulipTestCase):
     @override_settings(AUTHENTICATION_BACKENDS=('zproject.backends.ZulipLDAPAuthBackend',))
     def test_ldap_auth_email_auth_disabled_success(self) -> None:
         ldap_patcher = mock.patch('django_auth_ldap.config.ldap.initialize')
@@ -1719,25 +1734,11 @@ class FetchAPIKeyTest(ZulipTestCase):
                 AUTH_LDAP_BIND_PASSWORD='',
                 AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com'):
             result = self.client_post("/api/v1/fetch_api_key",
-                                      dict(username=self.email,
+                                      dict(username=self.example_email('hamlet'),
                                            password="testing"))
         self.assert_json_success(result)
         self.mock_ldap.reset()
         self.mock_initialize.stop()
-
-    def test_inactive_user(self) -> None:
-        do_deactivate_user(self.user_profile)
-        result = self.client_post("/api/v1/fetch_api_key",
-                                  dict(username=self.email,
-                                       password=initial_password(self.email)))
-        self.assert_json_error_contains(result, "Your account has been disabled", 403)
-
-    def test_deactivated_realm(self) -> None:
-        do_deactivate_realm(self.user_profile.realm)
-        result = self.client_post("/api/v1/fetch_api_key",
-                                  dict(username=self.email,
-                                       password=initial_password(self.email)))
-        self.assert_json_error_contains(result, "This organization has been deactivated", 403)
 
 class DevFetchAPIKeyTest(ZulipTestCase):
     def setUp(self) -> None:
@@ -1934,6 +1935,7 @@ class TestTwoFactor(ZulipTestCase):
             # User logs in when otp device exists.
             self.assertIn('otp_device_id', self.client.session.keys())
 
+class TestTwoFactorLDAP(ZulipTestCase):
     @mock.patch('two_factor.models.totp')
     def test_two_factor_login_with_ldap(self, mock_totp):
         # type: (mock.MagicMock) -> None

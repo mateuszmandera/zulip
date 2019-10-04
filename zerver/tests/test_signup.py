@@ -2487,6 +2487,139 @@ class UserSignUpTest(InviteUserBase):
         result = self.client_get('/register', subdomain="", follow=True)
         self.assert_in_success_response(["Find your Zulip accounts"], result)
 
+    def test_registration_when_name_changes_are_disabled(self) -> None:
+        """
+        Test `name_changes_disabled` when we are not running under LDAP.
+        """
+        password = "testing"
+        email = "newuser@zulip.com"
+        subdomain = "zulip"
+
+        with patch('zerver.views.registration.get_subdomain', return_value=subdomain):
+            result = self.client_post('/register/', {'email': email})
+
+        self.assertEqual(result.status_code, 302)
+        self.assertTrue(result["Location"].endswith(
+            "/accounts/send_confirm/%s" % (email,)))
+        result = self.client_get(result["Location"])
+        self.assert_in_response("Check your email so we can get started.", result)
+
+        with patch('zerver.views.registration.name_changes_disabled', return_value=True):
+            result = self.submit_reg_form_for_user(email,
+                                                   password,
+                                                   full_name="New Name",
+                                                   # Pass HTTP_HOST for the target subdomain
+                                                   HTTP_HOST=subdomain + ".testserver")
+            user_profile = UserProfile.objects.get(email=email)
+            # 'New Name' comes from POST data; not from LDAP session.
+            self.assertEqual(user_profile.full_name, 'New Name')
+
+    @patch('DNS.dnslookup', return_value=[['sipbtest:*:20922:101:Fred Sipb,,,:/mit/sipbtest:/bin/athena/tcsh']])
+    def test_registration_of_mirror_dummy_user(self, ignored: Any) -> None:
+        password = "test"
+        subdomain = "zephyr"
+        user_profile = self.mit_user("sipbtest")
+        email = user_profile.email
+        user_profile.is_mirror_dummy = True
+        user_profile.is_active = False
+        user_profile.save()
+
+        result = self.client_post('/register/', {'email': email}, subdomain="zephyr")
+
+        self.assertEqual(result.status_code, 302)
+        self.assertTrue(result["Location"].endswith(
+            "/accounts/send_confirm/%s" % (email,)))
+        result = self.client_get(result["Location"], subdomain="zephyr")
+        self.assert_in_response("Check your email so we can get started.", result)
+        # Visit the confirmation link.
+        from django.core.mail import outbox
+        for message in reversed(outbox):
+            if email in message.to:
+                confirmation_link_pattern = re.compile(settings.EXTERNAL_HOST + r"(\S+)>")
+                confirmation_url = confirmation_link_pattern.search(
+                    message.body).groups()[0]
+                break
+        else:
+            raise AssertionError("Couldn't find a confirmation email.")
+
+        result = self.client_get(confirmation_url, subdomain="zephyr")
+        self.assertEqual(result.status_code, 200)
+
+        # If the mirror dummy user is already active, attempting to
+        # submit the registration form should raise an AssertionError
+        # (this is an invalid state, so it's a bug we got here):
+        user_profile.is_active = True
+        user_profile.save()
+        with self.assertRaisesRegex(AssertionError, "Mirror dummy user is already active!"):
+            result = self.submit_reg_form_for_user(
+                email,
+                password,
+                from_confirmation='1',
+                # Pass HTTP_HOST for the target subdomain
+                HTTP_HOST=subdomain + ".testserver")
+
+        user_profile.is_active = False
+        user_profile.save()
+
+        result = self.submit_reg_form_for_user(email,
+                                               password,
+                                               from_confirmation='1',
+                                               # Pass HTTP_HOST for the target subdomain
+                                               HTTP_HOST=subdomain + ".testserver")
+        self.assertEqual(result.status_code, 200)
+        result = self.submit_reg_form_for_user(email,
+                                               password,
+                                               # Pass HTTP_HOST for the target subdomain
+                                               HTTP_HOST=subdomain + ".testserver")
+        self.assertEqual(result.status_code, 302)
+        self.assert_logged_in_user_id(user_profile.id)
+
+    def test_registration_of_active_mirror_dummy_user(self) -> None:
+        """
+        Trying to activate an already-active mirror dummy user should
+        raise an AssertionError.
+        """
+        user_profile = self.mit_user("sipbtest")
+        email = user_profile.email
+        user_profile.is_mirror_dummy = True
+        user_profile.is_active = True
+        user_profile.save()
+
+        with self.assertRaisesRegex(AssertionError, "Mirror dummy user is already active!"):
+            self.client_post('/register/', {'email': email}, subdomain="zephyr")
+
+    @override_settings(TERMS_OF_SERVICE=False)
+    def test_dev_user_registration(self) -> None:
+        """Verify that /devtools/register_user creates a new user, logs them
+        in, and redirects to the logged-in app."""
+        count = UserProfile.objects.count()
+        email = "user-%d@zulip.com" % (count,)
+
+        result = self.client_post('/devtools/register_user/')
+        user_profile = UserProfile.objects.all().order_by("id").last()
+
+        self.assertEqual(result.status_code, 302)
+        self.assertEqual(user_profile.email, email)
+        self.assertEqual(result['Location'], "http://zulip.testserver/")
+        self.assert_logged_in_user_id(user_profile.id)
+
+    @override_settings(TERMS_OF_SERVICE=False)
+    def test_dev_user_registration_create_realm(self) -> None:
+        count = UserProfile.objects.count()
+        string_id = "realm-%d" % (count,)
+
+        result = self.client_post('/devtools/register_realm/')
+        self.assertEqual(result.status_code, 302)
+        self.assertTrue(result["Location"].startswith(
+            'http://{}.testserver/accounts/login/subdomain'.format(string_id)))
+        result = self.client_get(result["Location"], subdomain=string_id)
+        self.assertEqual(result.status_code, 302)
+        self.assertEqual(result["Location"], 'http://{}.testserver'.format(string_id))
+
+        user_profile = UserProfile.objects.all().order_by("id").last()
+        self.assert_logged_in_user_id(user_profile.id)
+
+class LDAPUserSignUpTest(InviteUserBase):
     @override_settings(AUTHENTICATION_BACKENDS=('zproject.backends.ZulipLDAPAuthBackend',
                                                 'zproject.backends.ZulipDummyBackend'))
     def test_ldap_registration_from_confirmation(self) -> None:
@@ -3007,33 +3140,6 @@ class UserSignUpTest(InviteUserBase):
         sub = get_stream_subscriptions_for_user(user_profile).filter(recipient__type_id=stream.id)
         self.assertEqual(len(sub), 1)
 
-    def test_registration_when_name_changes_are_disabled(self) -> None:
-        """
-        Test `name_changes_disabled` when we are not running under LDAP.
-        """
-        password = "testing"
-        email = "newuser@zulip.com"
-        subdomain = "zulip"
-
-        with patch('zerver.views.registration.get_subdomain', return_value=subdomain):
-            result = self.client_post('/register/', {'email': email})
-
-        self.assertEqual(result.status_code, 302)
-        self.assertTrue(result["Location"].endswith(
-            "/accounts/send_confirm/%s" % (email,)))
-        result = self.client_get(result["Location"])
-        self.assert_in_response("Check your email so we can get started.", result)
-
-        with patch('zerver.views.registration.name_changes_disabled', return_value=True):
-            result = self.submit_reg_form_for_user(email,
-                                                   password,
-                                                   full_name="New Name",
-                                                   # Pass HTTP_HOST for the target subdomain
-                                                   HTTP_HOST=subdomain + ".testserver")
-            user_profile = UserProfile.objects.get(email=email)
-            # 'New Name' comes from POST data; not from LDAP session.
-            self.assertEqual(user_profile.full_name, 'New Name')
-
     def test_realm_creation_through_ldap(self) -> None:
         password = "testing"
         email = "newuser@zulip.com"
@@ -3095,111 +3201,6 @@ class UserSignUpTest(InviteUserBase):
             self.assert_in_success_response(["We just need you to do one last thing.",
                                              "newuser@zulip.com"],
                                             result)
-
-    @patch('DNS.dnslookup', return_value=[['sipbtest:*:20922:101:Fred Sipb,,,:/mit/sipbtest:/bin/athena/tcsh']])
-    def test_registration_of_mirror_dummy_user(self, ignored: Any) -> None:
-        password = "test"
-        subdomain = "zephyr"
-        user_profile = self.mit_user("sipbtest")
-        email = user_profile.email
-        user_profile.is_mirror_dummy = True
-        user_profile.is_active = False
-        user_profile.save()
-
-        result = self.client_post('/register/', {'email': email}, subdomain="zephyr")
-
-        self.assertEqual(result.status_code, 302)
-        self.assertTrue(result["Location"].endswith(
-            "/accounts/send_confirm/%s" % (email,)))
-        result = self.client_get(result["Location"], subdomain="zephyr")
-        self.assert_in_response("Check your email so we can get started.", result)
-        # Visit the confirmation link.
-        from django.core.mail import outbox
-        for message in reversed(outbox):
-            if email in message.to:
-                confirmation_link_pattern = re.compile(settings.EXTERNAL_HOST + r"(\S+)>")
-                confirmation_url = confirmation_link_pattern.search(
-                    message.body).groups()[0]
-                break
-        else:
-            raise AssertionError("Couldn't find a confirmation email.")
-
-        result = self.client_get(confirmation_url, subdomain="zephyr")
-        self.assertEqual(result.status_code, 200)
-
-        # If the mirror dummy user is already active, attempting to
-        # submit the registration form should raise an AssertionError
-        # (this is an invalid state, so it's a bug we got here):
-        user_profile.is_active = True
-        user_profile.save()
-        with self.assertRaisesRegex(AssertionError, "Mirror dummy user is already active!"):
-            result = self.submit_reg_form_for_user(
-                email,
-                password,
-                from_confirmation='1',
-                # Pass HTTP_HOST for the target subdomain
-                HTTP_HOST=subdomain + ".testserver")
-
-        user_profile.is_active = False
-        user_profile.save()
-
-        result = self.submit_reg_form_for_user(email,
-                                               password,
-                                               from_confirmation='1',
-                                               # Pass HTTP_HOST for the target subdomain
-                                               HTTP_HOST=subdomain + ".testserver")
-        self.assertEqual(result.status_code, 200)
-        result = self.submit_reg_form_for_user(email,
-                                               password,
-                                               # Pass HTTP_HOST for the target subdomain
-                                               HTTP_HOST=subdomain + ".testserver")
-        self.assertEqual(result.status_code, 302)
-        self.assert_logged_in_user_id(user_profile.id)
-
-    def test_registration_of_active_mirror_dummy_user(self) -> None:
-        """
-        Trying to activate an already-active mirror dummy user should
-        raise an AssertionError.
-        """
-        user_profile = self.mit_user("sipbtest")
-        email = user_profile.email
-        user_profile.is_mirror_dummy = True
-        user_profile.is_active = True
-        user_profile.save()
-
-        with self.assertRaisesRegex(AssertionError, "Mirror dummy user is already active!"):
-            self.client_post('/register/', {'email': email}, subdomain="zephyr")
-
-    @override_settings(TERMS_OF_SERVICE=False)
-    def test_dev_user_registration(self) -> None:
-        """Verify that /devtools/register_user creates a new user, logs them
-        in, and redirects to the logged-in app."""
-        count = UserProfile.objects.count()
-        email = "user-%d@zulip.com" % (count,)
-
-        result = self.client_post('/devtools/register_user/')
-        user_profile = UserProfile.objects.all().order_by("id").last()
-
-        self.assertEqual(result.status_code, 302)
-        self.assertEqual(user_profile.email, email)
-        self.assertEqual(result['Location'], "http://zulip.testserver/")
-        self.assert_logged_in_user_id(user_profile.id)
-
-    @override_settings(TERMS_OF_SERVICE=False)
-    def test_dev_user_registration_create_realm(self) -> None:
-        count = UserProfile.objects.count()
-        string_id = "realm-%d" % (count,)
-
-        result = self.client_post('/devtools/register_realm/')
-        self.assertEqual(result.status_code, 302)
-        self.assertTrue(result["Location"].startswith(
-            'http://{}.testserver/accounts/login/subdomain'.format(string_id)))
-        result = self.client_get(result["Location"], subdomain=string_id)
-        self.assertEqual(result.status_code, 302)
-        self.assertEqual(result["Location"], 'http://{}.testserver'.format(string_id))
-
-        user_profile = UserProfile.objects.all().order_by("id").last()
-        self.assert_logged_in_user_id(user_profile.id)
 
 class DeactivateUserTest(ZulipTestCase):
 

@@ -183,64 +183,6 @@ class ChangeSettingsTest(ZulipTestCase):
             ))
         self.assert_json_error(result, "Wrong password!")
 
-    @override_settings(AUTHENTICATION_BACKENDS=('zproject.backends.ZulipLDAPAuthBackend',
-                                                'zproject.backends.EmailAuthBackend',
-                                                'zproject.backends.ZulipDummyBackend'),
-                       AUTH_LDAP_BIND_PASSWORD='',
-                       AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com')
-    def test_change_password_ldap_backend(self) -> None:
-        ldap_user_attr_map = {'full_name': 'fn', 'short_name': 'sn'}
-        ldap_patcher = patch('django_auth_ldap.config.ldap.initialize')
-        mock_initialize = ldap_patcher.start()
-        mock_ldap = MockLDAP()
-        mock_initialize.return_value = mock_ldap
-
-        mock_ldap.directory = {
-            'uid=hamlet,ou=users,dc=zulip,dc=com': {
-                'userPassword': ['ldappassword', ],
-                'fn': ['New LDAP fullname']
-            }
-        }
-
-        self.login(self.example_email("hamlet"))
-        with self.settings(LDAP_APPEND_DOMAIN="zulip.com",
-                           AUTH_LDAP_USER_ATTR_MAP=ldap_user_attr_map):
-            result = self.client_patch(
-                "/json/settings",
-                dict(
-                    old_password=initial_password(self.example_email("hamlet")),
-                    new_password="ignored",
-                ))
-            self.assert_json_error(result, "Your Zulip password is managed in LDAP")
-
-            result = self.client_patch(
-                "/json/settings",
-                dict(
-                    old_password='ldappassword',
-                    new_password="ignored",
-                ))
-            self.assert_json_error(result, "Your Zulip password is managed in LDAP")
-
-        with self.settings(LDAP_APPEND_DOMAIN="example.com",
-                           AUTH_LDAP_USER_ATTR_MAP=ldap_user_attr_map):
-            result = self.client_patch(
-                "/json/settings",
-                dict(
-                    old_password=initial_password(self.example_email("hamlet")),
-                    new_password="ignored",
-                ))
-            self.assert_json_success(result)
-
-        with self.settings(LDAP_APPEND_DOMAIN=None,
-                           AUTH_LDAP_USER_ATTR_MAP=ldap_user_attr_map):
-            result = self.client_patch(
-                "/json/settings",
-                dict(
-                    old_password=initial_password(self.example_email("hamlet")),
-                    new_password="ignored",
-                ))
-            self.assert_json_error(result, "Your Zulip password is managed in LDAP")
-
     def test_changing_nothing_returns_error(self) -> None:
         """
         We need to supply at least one non-empty parameter
@@ -334,6 +276,65 @@ class ChangeSettingsTest(ZulipTestCase):
             with get_test_image_file('img.png') as fp1:
                 result = self.client_post("/json/users/me/avatar", {'f1': fp1})
             self.assert_json_error(result, "Avatar changes are disabled in this organization.", 400)
+
+class ChangeSettingsLDAPTest(ZulipTestCase):
+    @override_settings(AUTHENTICATION_BACKENDS=('zproject.backends.ZulipLDAPAuthBackend',
+                                                'zproject.backends.EmailAuthBackend',
+                                                'zproject.backends.ZulipDummyBackend'),
+                       AUTH_LDAP_BIND_PASSWORD='',
+                       AUTH_LDAP_USER_DN_TEMPLATE='uid=%(user)s,ou=users,dc=zulip,dc=com')
+    def test_change_password_ldap_backend(self) -> None:
+        ldap_user_attr_map = {'full_name': 'fn', 'short_name': 'sn'}
+        ldap_patcher = patch('django_auth_ldap.config.ldap.initialize')
+        mock_initialize = ldap_patcher.start()
+        mock_ldap = MockLDAP()
+        mock_initialize.return_value = mock_ldap
+
+        mock_ldap.directory = {
+            'uid=hamlet,ou=users,dc=zulip,dc=com': {
+                'userPassword': ['ldappassword', ],
+                'fn': ['New LDAP fullname']
+            }
+        }
+
+        self.login(self.example_email("hamlet"))
+        with self.settings(LDAP_APPEND_DOMAIN="zulip.com",
+                           AUTH_LDAP_USER_ATTR_MAP=ldap_user_attr_map):
+            result = self.client_patch(
+                "/json/settings",
+                dict(
+                    old_password=initial_password(self.example_email("hamlet")),
+                    new_password="ignored",
+                ))
+            self.assert_json_error(result, "Your Zulip password is managed in LDAP")
+
+            result = self.client_patch(
+                "/json/settings",
+                dict(
+                    old_password='ldappassword',
+                    new_password="ignored",
+                ))
+            self.assert_json_error(result, "Your Zulip password is managed in LDAP")
+
+        with self.settings(LDAP_APPEND_DOMAIN="example.com",
+                           AUTH_LDAP_USER_ATTR_MAP=ldap_user_attr_map):
+            result = self.client_patch(
+                "/json/settings",
+                dict(
+                    old_password=initial_password(self.example_email("hamlet")),
+                    new_password="ignored",
+                ))
+            self.assert_json_success(result)
+
+        with self.settings(LDAP_APPEND_DOMAIN=None,
+                           AUTH_LDAP_USER_ATTR_MAP=ldap_user_attr_map):
+            result = self.client_patch(
+                "/json/settings",
+                dict(
+                    old_password=initial_password(self.example_email("hamlet")),
+                    new_password="ignored",
+                ))
+            self.assert_json_error(result, "Your Zulip password is managed in LDAP")
 
 class UserChangesTest(ZulipTestCase):
     def test_update_api_key(self) -> None:
