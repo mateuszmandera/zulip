@@ -2469,7 +2469,7 @@ class TestLDAP(ZulipLDAPTestCase):
         with self.settings(
             LDAP_EMAIL_ATTR='mail',
             AUTH_LDAP_REVERSE_EMAIL_SEARCH = LDAPSearch("ou=users,dc=zulip,dc=com",
-                                                        ldap.SCOPE_SUBTREE,
+                                                        ldap.SCOPE_ONELEVEL,
                                                         "(mail=%(email)s)"),
             AUTH_LDAP_USERNAME_ATTR = "uid"
         ):

@@ -886,6 +886,15 @@ class LDAPTestCase(ZulipTestCase):
         if "AUTH_LDAP_USER_SEARCH" not in kwargs:
             kwargs["AUTH_LDAP_USER_SEARCH"] = LDAPSearch("ou=users,dc=zulip,dc=com",
                                                          ldap.SCOPE_ONELEVEL, "(uid=%(user)s)")
+        if not kwargs.get("LDAP_APPEND_DOMAIN"):
+            # If LDAP_APPEND_DOMAIN is not used, email search should be configured.
+            # Use defaults here, unless the test specifies its own settings for these.
+            if "AUTH_LDAP_REVERSE_EMAIL_SEARCH" not in kwargs:
+                kwargs["AUTH_LDAP_REVERSE_EMAIL_SEARCH"] = LDAPSearch("ou=users,dc=zulip,dc=com",
+                                                                      ldap.SCOPE_ONELEVEL,
+                                                                      "(mail=%(email)s)")
+            if "AUTH_LDAP_USERNAME_ATTR" not in kwargs:
+                kwargs["AUTH_LDAP_USERNAME_ATTR"] = "uid"
         settings_kwargs = {}  # type: Dict[str, Any]
         for key, value in kwargs.items():
             settings_kwargs[key] = value
