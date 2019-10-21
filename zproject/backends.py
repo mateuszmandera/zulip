@@ -17,6 +17,7 @@ import logging
 import magic
 import ujson
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing_extensions import TypedDict
 
 from django_auth_ldap.backend import LDAPBackend, _LDAPUser, ldap_error
 from django.contrib.auth import get_backends
@@ -905,6 +906,9 @@ def social_auth_finish(backend: Any,
 
 class SocialAuthMixin(ZulipAuthMixin):
     auth_backend_name = "undeclared"
+    name = "undeclared"
+    display_logo = None  # type: Optional[str]
+
     # Used to determine how to order buttons on login form, backend with
     # higher sort order are displayed first.
     sort_order = 0
@@ -933,8 +937,10 @@ class SocialAuthMixin(ZulipAuthMixin):
             return None
 
 class GitHubAuthBackend(SocialAuthMixin, GithubOAuth2):
+    name = "github"
     auth_backend_name = "GitHub"
     sort_order = 100
+    display_logo = "/static/images/landing-page/logos/github-icon.png"
 
     def get_verified_emails(self, *args: Any, **kwargs: Any) -> List[str]:
         access_token = kwargs["response"]["access_token"]
@@ -998,12 +1004,15 @@ class GitHubAuthBackend(SocialAuthMixin, GithubOAuth2):
 
 class AzureADAuthBackend(SocialAuthMixin, AzureADOAuth2):
     sort_order = 50
+    name = "azuread"
     auth_backend_name = "AzureAD"
+    display_logo = "/static/images/landing-page/logos/azuread-icon.png"
 
 class GoogleAuthBackend(SocialAuthMixin, GoogleOAuth2):
     sort_order = 150
     auth_backend_name = "Google"
     name = "google"
+    display_logo = "/static/images/landing-page/logos/googl_e-icon.png"
 
     def get_verified_emails(self, *args: Any, **kwargs: Any) -> List[str]:
         verified_emails = []    # type: List[str]
@@ -1018,10 +1027,12 @@ class SAMLAuthBackend(SocialAuthMixin, SAMLAuth):
     standard_relay_params = ["subdomain", "multiuse_object_key", "mobile_flow_otp",
                              "next", "is_signup"]
     REDIS_EXPIRATION_SECONDS = 60 * 15
+    name = "saml"
     # Organization which go through the trouble of setting up SAML are most likely
     # to have it as their main authentication method, so it seems appropriate to have
     # SAML buttons at the top.
     sort_order = 9999
+    display_logo = "/static/images/landing-page/logos/saml-icon.png"
 
     def auth_url(self) -> str:
         """Get the URL to which we must redirect in order to
@@ -1134,6 +1145,53 @@ class SAMLAuthBackend(SocialAuthMixin, SAMLAuth):
                     self.strategy.session_set(param, None)
 
         return result
+
+SocialBackendDictT = TypedDict('SocialBackendDictT', {
+    'name': str,
+    'display_name': str,
+    'display_logo': str,
+    'login_url': str,
+    'signup_url': str,
+    'sort_order': int,
+})
+
+def create_standard_social_backend_dict(social_backend: SocialAuthMixin) -> SocialBackendDictT:
+    assert social_backend.display_logo is not None
+    return dict(
+        name=social_backend.name,
+        display_name=social_backend.auth_backend_name,
+        display_logo=social_backend.display_logo,
+        login_url=reverse('login-social', args=(social_backend.name,)),
+        signup_url=reverse('signup-social', args=(social_backend.name,)),
+        sort_order=social_backend.sort_order
+    )
+
+def list_saml_backend_dicts(realm: Optional[Realm]=None) -> List[SocialBackendDictT]:
+    result = []  # type: List[SocialBackendDictT]
+    for idp_name, idp_dict in settings.SOCIAL_AUTH_SAML_ENABLED_IDPS.items():
+        assert idp_dict.get('display_logo') is not None
+        saml_dict = dict(
+            name='saml:{}'.format(idp_name),
+            display_name=idp_dict['display_name'],
+            display_logo=idp_dict['display_logo'],
+            login_url=reverse('login-social-extra-arg', args=('saml', idp_name)),
+            signup_url=reverse('signup-social-extra-arg', args=('saml', idp_name)),
+            sort_order=SAMLAuthBackend.sort_order - len(result)
+        )  # type: SocialBackendDictT
+        result.append(saml_dict)
+
+    return result
+
+def get_social_backend_dicts(realm: Optional[Realm]=None) -> List[SocialBackendDictT]:
+    result = []
+    for backend in SOCIAL_AUTH_BACKENDS:
+        if auth_enabled_helper([backend.auth_backend_name], realm):
+            if backend != SAMLAuthBackend:
+                result.append(create_standard_social_backend_dict(backend))
+            else:
+                result += list_saml_backend_dicts(realm)
+
+    return sorted(result, key=lambda x: x['sort_order'], reverse=True)
 
 AUTH_BACKEND_NAME_MAP = {
     'Dev': DevAuthBackend,
