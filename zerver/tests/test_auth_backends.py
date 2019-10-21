@@ -32,7 +32,7 @@ from zerver.lib.avatar_hash import user_avatar_path
 from zerver.lib.dev_ldap_directory import generate_dev_ldap_dir
 from zerver.lib.mobile_auth_otp import otp_decrypt_api_key
 from zerver.lib.validator import validate_login_email, \
-    check_bool, check_dict_only, check_string, Validator
+    check_bool, check_dict_only, check_list, check_string, Validator
 from zerver.lib.request import JsonableError
 from zerver.lib.storage import static_path
 from zerver.lib.users import get_all_api_keys
@@ -56,7 +56,7 @@ from zproject.backends import ZulipDummyBackend, EmailAuthBackend, \
     require_email_format_usernames, AUTH_BACKEND_NAME_MAP, \
     ZulipLDAPConfigurationError, ZulipLDAPExceptionOutsideDomain, \
     ZulipLDAPException, query_ldap, sync_user_from_ldap, SocialAuthMixin, \
-    PopulateUserLDAPError, SAMLAuthBackend, saml_auth_enabled
+    PopulateUserLDAPError, SAMLAuthBackend, saml_auth_enabled, get_social_backend_dicts
 
 from zerver.views.auth import (maybe_send_to_registration,
                                _subdomain_token_salt)
@@ -1834,10 +1834,12 @@ class FetchAuthBackends(ZulipTestCase):
             ]
             for backend_name_with_case in AUTH_BACKEND_NAME_MAP:
                 authentication_methods_list.append((backend_name_with_case.lower(), check_bool))
+            social_backends = get_social_backend_dicts()
 
             self.assert_json_success(result)
             checker = check_dict_only([
                 ('authentication_methods', check_dict_only(authentication_methods_list)),
+                ('social_backends', check_list(None, length=len(social_backends))),
                 ('email_auth_enabled', check_bool),
                 ('is_incompatible', check_bool),
                 ('require_email_format_usernames', check_bool),
