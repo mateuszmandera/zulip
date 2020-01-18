@@ -39,7 +39,7 @@ from zerver.signals import email_on_new_login
 from zproject.backends import password_auth_enabled, dev_auth_enabled, \
     ldap_auth_enabled, ZulipLDAPConfigurationError, ZulipLDAPAuthBackend, \
     AUTH_BACKEND_NAME_MAP, auth_enabled_helper, saml_auth_enabled, SAMLAuthBackend, \
-    redirect_to_config_error, ZulipRemoteUserBackend
+    redirect_to_config_error, ZulipRemoteUserBackend, needs_to_register
 from version import ZULIP_VERSION
 
 import jwt
@@ -216,11 +216,12 @@ def login_or_register_remote_user(request: HttpRequest, remote_username: str,
     * A zulip:// URL to send control back to the mobile apps if they
       are doing authentication using the mobile_flow_otp flow.
     """
-    if user_profile is None or user_profile.is_mirror_dummy:
+    if needs_to_register(user_profile):
         return register_remote_user(request, remote_username, full_name,
                                     is_signup=is_signup, multiuse_object_key=multiuse_object_key,
                                     full_name_validated=full_name_validated)
 
+    assert user_profile is not None
     # Otherwise, the user has successfully authenticated to an
     # account, and we need to do the right thing depending whether
     # or not they're using the mobile OTP flow or want a browser session.

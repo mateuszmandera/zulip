@@ -873,6 +873,9 @@ def redirect_deactivated_user_to_login() -> HttpResponseRedirect:
     redirect_url = login_url + '?is_deactivated=true'
     return HttpResponseRedirect(redirect_url)
 
+def needs_to_register(user_profile: Optional[UserProfile]) -> bool:
+    return user_profile is None or user_profile.is_mirror_dummy
+
 def social_associate_user_helper(backend: BaseAuth, return_data: Dict[str, Any],
                                  *args: Any, **kwargs: Any) -> Optional[UserProfile]:
     """Responsible for doing the Zulip-account lookup and validation parts
@@ -1078,7 +1081,7 @@ def social_auth_finish(backend: Any,
     realm = Realm.objects.get(id=return_data["realm_id"])
     multiuse_object_key = strategy.session_get('multiuse_object_key', '')
     mobile_flow_otp = strategy.session_get('mobile_flow_otp')
-    if user_profile is None or user_profile.is_mirror_dummy:
+    if needs_to_register(user_profile):
         is_signup = strategy.session_get('is_signup') == '1'
     else:
         is_signup = False
