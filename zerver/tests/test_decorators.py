@@ -1248,8 +1248,10 @@ class InactiveUserTest(ZulipTestCase):
         user_profile = self.example_user("hamlet")
         do_deactivate_user(user_profile)
 
-        result = self.login_with_return(self.example_email("hamlet"))
-        self.assert_in_response("Your account is no longer active.", result)
+        result = self.login_with_return(user_profile.delivery_email)
+        self.assert_in_response(
+            "Your account {} is no longer active.".format(user_profile.delivery_email), result
+        )
 
     def test_login_deactivated_mirror_dummy(self) -> None:
         """
@@ -1290,7 +1292,10 @@ class InactiveUserTest(ZulipTestCase):
         form = OurAuthenticationForm(request, payload)
         with self.settings(AUTHENTICATION_BACKENDS=("zproject.backends.EmailAuthBackend",)):
             self.assertFalse(form.is_valid())
-            self.assertIn("Your account is no longer active", str(form.errors))
+            self.assertIn(
+                "Your account {} is no longer active".format(user_profile.delivery_email),
+                str(form.errors),
+            )
 
     def test_webhook_deactivated_user(self) -> None:
         """

@@ -11,6 +11,8 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.views import LoginView as DjangoLoginView
 from django.contrib.auth.views import PasswordResetView as DjangoPasswordResetView
 from django.contrib.auth.views import logout_then_login as django_logout_then_login
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.forms import Form
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, HttpResponseServerError
 from django.shortcuts import redirect, render
@@ -20,6 +22,7 @@ from django.utils.http import is_safe_url
 from django.utils.translation import ugettext as _
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_safe
+from jinja2 import Markup as mark_safe
 from social_django.utils import load_backend, load_strategy
 from two_factor.forms import BackupTokenForm
 from two_factor.views import LoginView as BaseTwoFactorLoginView
@@ -675,13 +678,22 @@ def add_dev_login_context(realm: Optional[Realm], context: Dict[str, Any]) -> No
 
 
 def update_login_page_context(request: HttpRequest, context: Dict[str, Any]) -> None:
-    for key in ("email", "already_registered", "is_deactivated"):
+    for key in ("email", "already_registered"):
         try:
             context[key] = request.GET[key]
         except KeyError:
             pass
 
-    context["deactivated_account_error"] = DEACTIVATED_ACCOUNT_ERROR
+    deactivated_email = request.GET.get("is_deactivated")
+    if deactivated_email is None:
+        return
+    try:
+        validate_email(deactivated_email)
+        context["deactivated_account_error"] = mark_safe(
+            DEACTIVATED_ACCOUNT_ERROR.format(username=deactivated_email)
+        )
+    except ValidationError:
+        logging.info("Invalid email in is_deactivated param to login page: %s", deactivated_email)
 
 
 class TwoFactorLoginView(BaseTwoFactorLoginView):
