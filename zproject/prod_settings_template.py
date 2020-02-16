@@ -203,10 +203,6 @@ AUTHENTICATION_BACKENDS: Tuple[str, ...] = (
 # subdomain; if you're using this setting, the "Callback URL" should be e.g.:
 #   https://auth.zulip.example.com/complete/github/
 #
-# If you end up using a subdomain other then the default
-# recommendation, you must also set the 'ROOT_SUBDOMAIN_ALIASES' list
-# to include this subdomain.
-#
 #SOCIAL_AUTH_SUBDOMAIN = 'auth'
 
 ########
