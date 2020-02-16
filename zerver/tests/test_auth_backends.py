@@ -161,7 +161,8 @@ class AuthBackendTest(ZulipTestCase):
         if isinstance(backend, SocialAuthMixin):
             # Returns a redirect to login page with an error.
             self.assertEqual(result.status_code, 302)
-            self.assertEqual(result.url, user_profile.realm.uri + "/login/?is_deactivated=true")
+            self.assertEqual(result.url,
+                             f"{user_profile.realm.uri}/login/?is_deactivated={user_profile.delivery_email}")
         else:
             # Just takes you back to the login page treating as
             # invalid auth; this is correct because the form will
@@ -973,9 +974,15 @@ class SocialAuthBase(DesktopFlowTestingLib, ZulipTestCase):
                                            expect_choose_email_screen=True,
                                            subdomain='zulip')
             self.assertEqual(result.status_code, 302)
-            self.assertEqual(result.url, user_profile.realm.uri + "/login/?is_deactivated=true")
+            self.assertEqual(result.url,
+                             f"{user_profile.realm.uri}/login/?is_deactivated={user_profile.delivery_email}")
         self.assertEqual(m.output, [self.logger_output(f"Failed login attempt for deactivated account: {user_profile.id}@zulip", 'info')])
-        # TODO: verify whether we provide a clear error message
+
+        result = self.client_get(result.url)
+        self.assert_in_success_response(
+            [f"Your account {user_profile.delivery_email} is no longer active."],
+            result
+        )
 
     def test_social_auth_invalid_realm(self) -> None:
         account_data_dict = self.get_account_data_dict(email=self.email, name=self.name)

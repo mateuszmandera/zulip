@@ -42,10 +42,10 @@ MIT_VALIDATION_ERROR = 'That user does not exist at MIT or is a ' + \
                        '<a href="https://ist.mit.edu/email-lists">mailing list</a>. ' + \
                        'If you want to sign up an alias for Zulip, ' + \
                        '<a href="mailto:support@zulip.com">contact us</a>.'
-WRONG_SUBDOMAIN_ERROR = "Your Zulip account is not a member of the " + \
+WRONG_SUBDOMAIN_ERROR = "Your Zulip account {username} is not a member of the " + \
                         "organization associated with this subdomain.  " + \
                         "Please contact your organization administrator with any questions."
-DEACTIVATED_ACCOUNT_ERROR = "Your account is no longer active. " + \
+DEACTIVATED_ACCOUNT_ERROR = "Your account {username} is no longer active. " + \
                             "Please contact your organization administrator to reactivate it."
 PASSWORD_TOO_WEAK_ERROR = "The password is too weak."
 AUTHENTICATION_RATE_LIMITED_ERROR = "You're making too many attempts to sign in. " + \
@@ -359,12 +359,14 @@ class OurAuthenticationForm(AuthenticationForm):
                 # We exclude mirror dummy accounts here. They should be treated as the
                 # user never having had an account, so we let them fall through to the
                 # normal invalid_login case below.
-                raise ValidationError(mark_safe(DEACTIVATED_ACCOUNT_ERROR))
+                error_message = DEACTIVATED_ACCOUNT_ERROR.format(username=username)
+                raise ValidationError(mark_safe(error_message))
 
             if return_data.get("invalid_subdomain"):
                 logging.warning("User %s attempted password login to wrong subdomain %s",
                                 username, subdomain)
-                raise ValidationError(mark_safe(WRONG_SUBDOMAIN_ERROR))
+                error_message = WRONG_SUBDOMAIN_ERROR.format(username=username)
+                raise ValidationError(mark_safe(error_message))
 
             if self.user_cache is None:
                 raise forms.ValidationError(
