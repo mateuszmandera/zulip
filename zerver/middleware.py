@@ -511,7 +511,10 @@ class HostDomainMiddleware(MiddlewareMixin):
             return None
 
         subdomain = get_subdomain(request)
-        if subdomain != Realm.SUBDOMAIN_FOR_ROOT_DOMAIN:
+        if (
+            subdomain != Realm.SUBDOMAIN_FOR_ROOT_DOMAIN
+            and subdomain != settings.SOCIAL_AUTH_SUBDOMAIN
+        ):
             try:
                 request.realm = get_realm(subdomain)
             except Realm.DoesNotExist:
