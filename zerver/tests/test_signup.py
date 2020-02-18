@@ -2584,6 +2584,10 @@ class RealmCreationTest(ZulipTestCase):
         result = self.client_get("/json/realm/subdomain/zu_lip")
         self.assert_in_success_response(["Subdomain can only have lowercase letters, numbers, and \'-\'s."], result)
 
+        with self.settings(SOCIAL_AUTH_SUBDOMAIN="zulipauth"):
+            result = self.client_get("/json/realm/subdomain/zulipauth")
+            self.assert_in_success_response(["Subdomain unavailable. Please choose a different one."], result)
+
         result = self.client_get("/json/realm/subdomain/hufflepuff")
         self.assert_in_success_response(["available"], result)
         self.assert_not_in_success_response(["unavailable"], result)
