@@ -45,7 +45,7 @@ MIT_VALIDATION_ERROR = 'That user does not exist at MIT or is a ' + \
 WRONG_SUBDOMAIN_ERROR = "Your Zulip account {username} is not a member of the " + \
                         "organization associated with this subdomain.  " + \
                         "Please contact your organization administrator with any questions."
-DEACTIVATED_ACCOUNT_ERROR = "Your account {username} is no longer active. " + \
+DEACTIVATED_ACCOUNT_ERROR = "Your account {username} has been deactivated. " + \
                             "Please contact your organization administrator to reactivate it."
 PASSWORD_TOO_WEAK_ERROR = "The password is too weak."
 AUTHENTICATION_RATE_LIMITED_ERROR = "You're making too many attempts to sign in. " + \

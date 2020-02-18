@@ -570,7 +570,7 @@ class LoginTest(ZulipTestCase):
         do_deactivate_user(user_profile)
         result = self.login_with_return(user_profile.delivery_email, "xxx")
         self.assertEqual(result.status_code, 200)
-        self.assert_in_response("Your account {} is no longer active.".format(user_profile.delivery_email),
+        self.assert_in_response(f"Your account {user_profile.delivery_email} has been deactivated.",
                                 result)
         self.assert_logged_in_user_id(None)
 
