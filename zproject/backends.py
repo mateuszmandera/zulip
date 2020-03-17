@@ -41,11 +41,13 @@ from social_core.backends.github import GithubOAuth2, GithubOrganizationOAuth2, 
     GithubTeamOAuth2
 from social_core.backends.azuread import AzureADOAuth2
 from social_core.backends.gitlab import GitLabOAuth2
+from social_core.backends.apple import AppleIdAuth
 from social_core.backends.base import BaseAuth
 from social_core.backends.google import GoogleOAuth2
 from social_core.backends.saml import SAMLAuth
 from social_core.pipeline.partial import partial
-from social_core.exceptions import AuthFailed, SocialAuthBaseException
+from social_core.exceptions import AuthFailed, SocialAuthBaseException, \
+    AuthMissingParameter, AuthStateForbidden
 
 from zerver.decorator import client_is_exempt_from_rate_limiting
 from zerver.lib.actions import do_create_user, do_reactivate_user, do_deactivate_user, \
@@ -64,7 +66,6 @@ from zerver.models import CustomProfileField, DisposableEmailError, DomainNotAll
     EmailContainsPlusError, PreregistrationUser, UserProfile, Realm, custom_profile_fields_for_realm, \
     get_user_profile_by_id, remote_user_to_email, \
     email_to_username, get_realm, get_user_by_delivery_email, supported_auth_backends
-
 redis_client = get_redis_client()
 
 # This first batch of methods is used by other code in Zulip to check
@@ -116,6 +117,9 @@ def github_auth_enabled(realm: Optional[Realm]=None) -> bool:
 
 def gitlab_auth_enabled(realm: Optional[Realm]=None) -> bool:
     return auth_enabled_helper(['GitLab'], realm)
+
+def apple_auth_enabled(realm: Optional[Realm]=None) -> bool:
+    return auth_enabled_helper(['Apple'], realm)
 
 def saml_auth_enabled(realm: Optional[Realm]=None) -> bool:
     return auth_enabled_helper(['SAML'], realm)
@@ -1145,7 +1149,11 @@ def social_associate_user_helper(backend: BaseAuth, return_data: Dict[str, Any],
         if not first_name and not last_name:
             # If we add support for any of the social auth backends that
             # don't provide this feature, we'll need to add code here.
-            raise AssertionError("Social auth backend doesn't provide name")
+            if (backend.name != 'apple'):
+                # Apple provides name only for the first time user tries
+                # to login. So, if the first attempt fails this sets
+                # names to be empty and lets the user set it when registering.
+                raise AssertionError("Social auth backend doesn't provide name")
 
     if full_name:
         return_data["full_name"] = full_name
@@ -1444,6 +1452,79 @@ class GitLabAuthBackend(SocialAuthMixin, GitLabOAuth2):
     # authentication like we do for the GitHub integration.  Instead,
     # we just use the primary email address, which is always verified.
     # (No code is required to do so, as that's the default behavior).
+
+@external_auth_method
+class AppleAuthBackend(SocialAuthMixin, AppleIdAuth):
+    sort_order = 10
+    name = "apple"
+    auth_backend_name = "Apple"
+    full_name_validated = True
+    REDIS_EXPIRATION_SECONDS = 60*10
+
+    @staticmethod
+    def get_apple_locale(django_language_code: str) -> str:
+        '''
+        Get the suitable apple supported locale with language code
+        for the Sign in / Continue with Apple buttons it provides.
+        '''
+        # The following is a list of locale values supported by Apple to send
+        # as params to URL which renders "Sign in with Apple" and "Continue with Apple"
+        # buttons. Gathered from
+        # https://developer.apple.com/documentation/signinwithapplejs/incorporating_sign_in_with_apple_into_other_platforms .
+        supported_locales = ['ar_SA', 'ca_ES', 'cs_CZ', 'da_DK', 'de_DE',
+                             'el_GR', 'en_US', 'es_ES', 'fi_FI', 'fr_FR',
+                             'hr_HR', 'hu_HU', 'id_ID', 'it_IT', 'iw_IL',
+                             'ja_JP', 'ko_KR', 'ms_MY', 'nl_NL', 'no_NO',
+                             'pl_PL', 'pt_PT', 'ro_RO', 'ru_RU', 'sk_SK',
+                             'sv_SE', 'th_TH', 'tr_TR', 'uk_UA', 'vi_VI',
+                             'zh_CN']
+        for locale in supported_locales:
+            if django_language_code in locale:
+                return locale
+        return 'en_US'
+
+    # we override the following functions to set state as a redis key with
+    # data as values of variables in `SOCIAL_AUTH_FIELDS_STORED_IN_SESSION`
+    def get_or_create_state(self) -> str:
+        '''
+        Store state in redis for further request validation. The state
+        value is passed as state parameter (as specified in OAuth2 spec),
+        but also added to redirect, that way we can still verify the
+        request if the provider doesn't implement the state parameter.
+        Reuse token if any. This is usually stored in session but, because
+        apple sending user data as POST, storing is session doesn't work.
+        '''
+        request_data = self.strategy.request_data().dict()
+        data_to_store = {
+            key: request_data[key] for key in settings.SOCIAL_AUTH_FIELDS_STORED_IN_SESSION
+            if key in request_data
+        }
+        state = self.state_token()
+        put_dict_in_redis(redis_client, 'apple_auth_{token}',
+                          data_to_store, self.REDIS_EXPIRATION_SECONDS,
+                          token=state)
+        return state
+
+    def validate_state(self) -> Optional[str]:
+        """Validate state value. Raises exception on error, returns state
+        value if valid."""
+        request_state = self.get_request_state()
+
+        if not request_state:
+            logging.info("Sign in with Apple failed: missing state parameter.")
+            raise AuthMissingParameter(self, 'state')
+
+        formatted_request_state = "apple_auth_" + request_state
+        redis_data = get_dict_from_redis(redis_client, "apple_auth_{token}",
+                                         formatted_request_state)
+        if redis_data is None:
+            logging.info("Sign in with Apple failed: bad state token.")
+            raise AuthStateForbidden(self)
+
+        for param, value in redis_data.items():
+            if param in settings.SOCIAL_AUTH_FIELDS_STORED_IN_SESSION:
+                self.strategy.session_set(param, value)
+        return request_state
 
 @external_auth_method
 class GoogleAuthBackend(SocialAuthMixin, GoogleOAuth2):

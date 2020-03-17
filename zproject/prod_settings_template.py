@@ -120,11 +120,46 @@ AUTHENTICATION_BACKENDS = (
     # 'zproject.backends.GoogleAuthBackend',  # Google auth, setup below
     # 'zproject.backends.GitHubAuthBackend',  # GitHub auth, setup below
     # 'zproject.backends.GitLabAuthBackend',  # GitLab auth, setup below
+    # 'zproject.backends.AppleAuthBackend',  # Apple auth, setup below
     # 'zproject.backends.AzureADAuthBackend',  # Microsoft Azure Active Directory auth, setup below
     # 'zproject.backends.SAMLAuthBackend', # SAML, setup below
     # 'zproject.backends.ZulipLDAPAuthBackend',  # LDAP, setup below
     # 'zproject.backends.ZulipRemoteUserBackend',  # Local SSO, setup docs on readthedocs
 )  # type: Tuple[str, ...]
+
+########
+# Apple OAuth.
+#
+# To set up Sign In with Apple, you'll need to do the following:
+#
+# (1) Visit https://developer.apple.com/account/resources/,
+# Follow the instructions in
+# https://help.apple.com/developer-account/?lang=en#/dev1c0e25352.
+# to Create a Services ID. In services ID, When prompted for a "Return URL",
+# enter `http://zulip.example.com/complete/apple/`.
+#
+# (2) Follow the instructions in
+# https://help.apple.com/developer-account/?lang=en#/dev77c875b7e
+# to create a Sign In with Apple private key.
+#
+# (3) You'll now have a "Services ID"(eg: com.application.your),a "Key ID"
+# and a Private key file. Use the "Services ID" as `SOCIAL_AUTH_APPLE_CLIENT`
+# and "Key ID" as `SOCIAL_AUTH_APPLE_KEY` and "Team ID" as
+# `SOCIAL_AUTH_APPLE_TEAM` here. All three are required.
+#
+# (4) Put the Private key file in zulip server in
+# /etc/zulip/apple/zulip-private-key.key. Make sure to set proper permissions
+# with the following commands
+# chown -R zulip:zulip /etc/zulip/apple/
+# chmod 640 /etc/zulip/apple/zulip-private-key.key
+#
+# (5) Register outbound domains with domains of emails configured in zulip server
+# to send notifications in your apple developer account. see "Email Relay Service"
+# in https://developer.apple.com/sign-in-with-apple/get-started/ for more info.
+#
+#SOCIAL_AUTH_APPLE_CLIENT = <your Services ID>
+#SOCIAL_AUTH_APPLE_TEAM = <your Team ID>
+#SOCIAL_AUTH_APPLE_KEY = <your Key ID>
 
 ########
 # Google OAuth.

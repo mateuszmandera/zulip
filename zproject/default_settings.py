@@ -47,6 +47,11 @@ FAKE_LDAP_NUM_USERS = 8
 
 # Social auth; we support providing values for some of these
 # settings in zulip-secrets.conf instead of settings.py in development.
+SOCIAL_AUTH_APPLE_CLIENT = get_secret('social_auth_apple_client', development_only=True)
+SOCIAL_AUTH_APPLE_KEY = get_secret('social_auth_apple_key', development_only=True)
+SOCIAL_AUTH_APPLE_TEAM = get_secret('social_auth_apple_team', development_only=True)  # type: Optional[str]
+SOCIAL_AUTH_APPLE_SCOPE = ['name', 'email']
+SOCIAL_AUTH_APPLE_EMAIL_AS_USERNAME = True
 SOCIAL_AUTH_GITHUB_KEY = get_secret('social_auth_github_key', development_only=True)
 SOCIAL_AUTH_GITHUB_ORG_NAME: Optional[str] = None
 SOCIAL_AUTH_GITHUB_TEAM_ID: Optional[str] = None

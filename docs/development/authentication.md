@@ -42,6 +42,27 @@ details worth understanding:
   password in the development environment, those passwords won't
   work.  It also prints out the user's **current** API key.
 
+### Apple
+
+* Visit https://developer.apple.com/account/resources/,
+  Enable App ID and Create a Services ID with the instructions in
+  https://help.apple.com/developer-account/?lang=en#/dev1c0e25352 .
+  When prompted for a "Return URL", enter
+  `http://zulipdev.com:9991/complete/apple/` .
+
+* [Create a Sign in with Apple private key](https://help.apple.com/developer-account/?lang=en#/dev77c875b7e)
+
+* In `dev-secrets.conf`, set `social_auth_apple_client` to your
+  "Services ID" (eg. com.application.your),
+  `social_auth_apple_key` to your "Key ID" and
+  put the private key file you got in
+  `/etc/zulip/apple/zulip-private-key.key` in zulip server. Make sure
+  to set proper permissions with following commands
+  ```
+  chown -R zulip:zulip /etc/zulip/apple/
+  chmod 640 /etc/zulip/apple/zulip-private-key.key
+  ```
+
 ### Google
 
 * Visit https://console.developers.google.com and navigate to "APIs &

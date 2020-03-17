@@ -679,6 +679,15 @@ button.login-social-button {
     }
 }
 
+button#login_auth_button_apple,
+button#register_auth_button_apple {
+    width: 328px;
+    height: 46px;
+    background-size: auto 100%;
+    background-position: 0px 100%;
+    font-size: 0px;
+}
+
 .login-page-container .right-side .actions,
 .back-to-login-wrapper {
     margin: 20px 0px 0px;

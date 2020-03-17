@@ -572,7 +572,6 @@ i18n_urls = [
     url(r'^config-error/(?P<error_category_name>[\w,-]+)$', zerver.views.auth.config_error_view,
         name='config_error'),
     url(r'^config-error/remoteuser/(?P<error_category_name>[\w,-]+)$', zerver.views.auth.config_error_view)
-
 ]
 
 # Make a copy of i18n_urls so that they appear without prefix for english
