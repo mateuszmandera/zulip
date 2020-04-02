@@ -29,9 +29,11 @@ class RateLimiterLockingException(Exception):
     pass
 
 class RateLimitedObject(ABC):
-    def __init__(self) -> None:
-        if settings.RUNNING_INSIDE_TORNADO:
-            self.backend = TornadoInMemoryRateLimiterBackend  # type: Type[RateLimiterBackend]
+    def __init__(self, backend: Optional['Type[RateLimiterBackend]']=None) -> None:
+        if backend is not None:
+            self.backend = backend  # type: Type[RateLimiterBackend]
+        elif settings.RUNNING_INSIDE_TORNADO:
+            self.backend = TornadoInMemoryRateLimiterBackend
         else:
             self.backend = RedisRateLimiterBackend
 
