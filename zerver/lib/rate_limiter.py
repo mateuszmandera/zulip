@@ -100,11 +100,11 @@ class RateLimitedObject(ABC):
         return rules_list or [(1, 9999), ]
 
     @abstractmethod
-    def key(self) -> str:
+    def key(self) -> str:  # nocoverage
         pass
 
     @abstractmethod
-    def rules(self) -> List[Tuple[int, int]]:
+    def rules(self) -> List[Tuple[int, int]]:  # nocoverage
         pass
 
 class RateLimitedUser(RateLimitedObject):
@@ -146,7 +146,7 @@ def remove_ratelimit_rule(range_seconds: int, num_requests: int, domain: str='ap
     global rules
     rules[domain] = [x for x in rules[domain] if x[0] != range_seconds and x[1] != num_requests]
 
-class RateLimiterBackend(ABC):
+class RateLimiterBackend(ABC):  # nocoverage
     @classmethod
     @abstractmethod
     def block_access(cls, entity_key: str, seconds: int) -> None:
@@ -365,7 +365,7 @@ class RedisRateLimiterBackend(RateLimiterBackend):
 
         if key_blocked is not None:
             # We are manually blocked. Report for how much longer we will be
-            if blocking_ttl_b is None:
+            if blocking_ttl_b is None:  # nocoverage # defensive code, this should never happen
                 blocking_ttl = 0.5
             else:
                 blocking_ttl = int(blocking_ttl_b)
@@ -432,7 +432,7 @@ class RedisRateLimiterBackend(RateLimiterBackend):
 
                     # If no exception was raised in the execution, there were no transaction conflicts
                     break
-                except redis.WatchError:
+                except redis.WatchError:  # nocoverage
                     if count > 10:
                         raise RateLimiterLockingException()
                     count += 1
