@@ -182,12 +182,30 @@ class TornadoInMemoryRateLimiterBackend(RateLimiterBackend):
     reset_times = {}  # type: Dict[str, Dict[Tuple[int, int], float]]
 
     # last_gc_time is the last time when the garbage was
-    # collected from reset_times.
-    last_gc_time = time.time()
+    # collected from reset_times for rule (time_window, max_count).
+    last_gc_time = {}  # type: Dict[Tuple[int, int], float]
 
     # timestamps_blocked_until[key] contains the timestamp
     # up to which the key has been blocked manually.
     timestamps_blocked_until = {}  # type: Dict[str, float]
+
+    @classmethod
+    def _garbage_collect_for_rule(cls, now: float, time_window: int, max_count: int) -> None:
+        keys_to_delete = []
+        for entity_key in cls.reset_times:
+            reset_times_for_entity = cls.reset_times[entity_key]
+            try:
+                reset_time = reset_times_for_entity[(time_window, max_count)]
+            except KeyError:
+                continue
+            if reset_time < now:
+                del reset_times_for_entity[(time_window, max_count)]
+
+            if len(reset_times_for_entity) == 0:
+                keys_to_delete.append(entity_key)
+
+        for entity_key in keys_to_delete:
+            del cls.reset_times[entity_key]
 
     @classmethod
     def need_to_limit(cls, entity_key: str, time_window: int,
@@ -208,12 +226,9 @@ class TornadoInMemoryRateLimiterBackend(RateLimiterBackend):
         now = time.time()
 
         # Remove all timestamps from `reset_times` that are too old.
-        if cls.last_gc_time <= now - time_window / max_count:
-            cls.last_gc_time = now
-            cls.reset_times = {entity_key: {rule: reset_time
-                                            for rule, reset_time in rules.items()
-                                            if reset_time > now}
-                               for entity_key, rules in cls.reset_times.items()}
+        if cls.last_gc_time.get((time_window, max_count), 0) <= now - time_window / max_count:
+            cls.last_gc_time[(time_window, max_count)] = now
+            cls._garbage_collect_for_rule(now, time_window, max_count)
 
         if entity_key in cls.timestamps_blocked_until:
             # Check whether the key is manually blocked.
