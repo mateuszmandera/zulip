@@ -177,9 +177,9 @@ class RateLimiterBackend(ABC):
         pass
 
 class TornadoInMemoryRateLimiterBackend(RateLimiterBackend):
-    # reset_times[key][rule] is the time at which the event
+    # reset_times[rule][key] is the time at which the event
     # request from the rate-limited key will be accepted.
-    reset_times = {}  # type: Dict[str, Dict[Tuple[int, int], float]]
+    reset_times = {}  # type: Dict[Tuple[int, int], Dict[str, float]]
 
     # last_gc_time is the last time when the garbage was
     # collected from reset_times for rule (time_window, max_count).
@@ -192,20 +192,19 @@ class TornadoInMemoryRateLimiterBackend(RateLimiterBackend):
     @classmethod
     def _garbage_collect_for_rule(cls, now: float, time_window: int, max_count: int) -> None:
         keys_to_delete = []
-        for entity_key in cls.reset_times:
-            reset_times_for_entity = cls.reset_times[entity_key]
-            try:
-                reset_time = reset_times_for_entity[(time_window, max_count)]
-            except KeyError:
-                continue
-            if reset_time < now:
-                del reset_times_for_entity[(time_window, max_count)]
+        reset_times_for_rule = cls.reset_times.get((time_window, max_count), None)
+        if reset_times_for_rule is None:
+            return
 
-            if len(reset_times_for_entity) == 0:
+        for entity_key in reset_times_for_rule:
+            if reset_times_for_rule[entity_key] < now:
                 keys_to_delete.append(entity_key)
 
         for entity_key in keys_to_delete:
-            del cls.reset_times[entity_key]
+            del reset_times_for_rule[entity_key]
+
+        if len(reset_times_for_rule) == 0:
+            del cls.reset_times[(time_window, max_count)]
 
     @classmethod
     def need_to_limit(cls, entity_key: str, time_window: int,
@@ -240,10 +239,10 @@ class TornadoInMemoryRateLimiterBackend(RateLimiterBackend):
                 # time has been expired.
                 del cls.timestamps_blocked_until[entity_key]
 
-        if entity_key in cls.reset_times and \
-           (time_window, max_count) in cls.reset_times[entity_key]:
+        if (time_window, max_count) in cls.reset_times and \
+                entity_key in cls.reset_times[(time_window, max_count)]:
             # Check whether the new request would overfill its bucket.
-            new_reset = max(cls.reset_times[entity_key][(time_window, max_count)], now) \
+            new_reset = max(cls.reset_times[(time_window, max_count)][entity_key], now) \
                 + time_window / max_count
         else:
             # The bucket was empty, so one request cannot overfill it.
@@ -254,20 +253,21 @@ class TornadoInMemoryRateLimiterBackend(RateLimiterBackend):
             time_till_free = new_reset - time_window - now
             return True, time_till_free
 
-        if entity_key in cls.reset_times:
+        if (time_window, max_count) in cls.reset_times:
             # If key is already present, add new_reset for another
             # rule of the key.
-            cls.reset_times[entity_key][(time_window, max_count)] = new_reset
+            cls.reset_times[(time_window, max_count)][entity_key] = new_reset
         else:
-            cls.reset_times[entity_key] = {(time_window, max_count): new_reset}
+            cls.reset_times[(time_window, max_count)] = {entity_key: new_reset}
         return False, 0.0
 
     @classmethod
     def get_api_calls_left(cls, entity_key: str, range_seconds: int,
                            max_calls: int) -> Tuple[int, float]:
         now = time.time()
-        if entity_key in cls.reset_times and (range_seconds, max_calls) in cls.reset_times[entity_key]:
-            reset_time = cls.reset_times[entity_key][(range_seconds, max_calls)]
+        if (range_seconds, max_calls) in cls.reset_times and \
+                entity_key in cls.reset_times[(range_seconds, max_calls)]:
+            reset_time = cls.reset_times[(range_seconds, max_calls)][entity_key]
         else:
             return max_calls, 0
 
@@ -285,7 +285,8 @@ class TornadoInMemoryRateLimiterBackend(RateLimiterBackend):
 
     @classmethod
     def clear_history(cls, entity_key: str) -> None:
-        cls.reset_times.pop(entity_key, None)
+        for rule, reset_times_for_rule in cls.reset_times.items():
+            reset_times_for_rule.pop(entity_key, None)
         cls.timestamps_blocked_until.pop(entity_key, None)
 
     @classmethod
