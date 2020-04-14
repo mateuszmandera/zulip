@@ -4,5 +4,5 @@ set -e
 set -x
 
 "$(dirname "$0")/zulip-puppet-apply" -f
-su zulip -c "$(dirname "$0")/restart-server"
+su zulip -c "$(dirname "$0")/restart-server --reload-nginx"
 

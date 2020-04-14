@@ -22,7 +22,6 @@ class zulip::sharding {
     owner   => 'zulip',
     group   => 'zulip',
     mode    => '0640',
-    notify  => Service['nginx'],
     content => "set \$tornado_server http://tornado;\n",
     replace => false,
   }

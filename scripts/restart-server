@@ -19,6 +19,8 @@ logging.basicConfig(format="%(asctime)s restart-server: %(message)s",
 parser = argparse.ArgumentParser()
 parser.add_argument('--fill-cache', action='store_true', dest='fill_cache', default=False,
                     help='Fill the memcached caches')
+parser.add_argument('--reload-nginx', action='store_true', dest='reload_nginx', default=False,
+                    help='Reload nginx configuration')
 args = parser.parse_args()
 
 deploy_path = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
@@ -70,6 +72,10 @@ if tornado_processes > 1:
 else:
     logging.info("Restarting Tornado process")
     subprocess.check_call(["supervisorctl", "restart", "zulip-tornado", "zulip-tornado:*"])
+
+if args.reload_nginx:
+    logging.info("Reloading nginx configuration")
+    subprocess.check_call(["nginx", "-s", "reload"])
 
 # Restart the uWSGI and related processes via supervisorctl.
 logging.info("Stopping workers")
