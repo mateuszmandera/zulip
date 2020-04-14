@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import sys
 from typing import Any, Dict
 
@@ -24,14 +25,20 @@ def print_shard(f: Any, host: str, port: str) -> None:
 # after changing.  TODO: We can probably make this live-reload by statting the file.
 #
 # TODO: Restructure this to automatically generate a sharding layout.
-with open('/etc/zulip/nginx_sharding.conf', 'w') as f:
-    f.write("set $tornado_server http://tornado9800;\n")
+with open('/etc/zulip/nginx_sharding.conf', 'w') as nginx_sharding_conf_f, \
+        open('/etc/zulip/sharding.json', 'w') as sharding_json_f:
 
     config_file = get_config_file()
     if not config_file.has_section("tornado_sharding"):
+        nginx_sharding_conf_f.write("set $tornado_server http://tornado;\n")
+        sharding_json_f.write('{}\n')
         sys.exit(0)
 
+    nginx_sharding_conf_f.write("set $tornado_server http://tornado9800;\n")
     shard_map = {}  # type: Dict[str, int]
+    external_host = subprocess.check_output([os.path.join(BASE_DIR, 'scripts/get-django-setting'),
+                                             'EXTERNAL_HOST'],
+                                            universal_newlines=True).strip()
     for port in config_file["tornado_sharding"]:
         shards = config_file["tornado_sharding"][port].strip().split(' ')
 
@@ -39,13 +46,12 @@ with open('/etc/zulip/nginx_sharding.conf', 'w') as f:
             if '.' in shard:
                 host = shard
             else:
-                host = shard + ".zulipchat.com"
+                host = "{}.{}".format(shard, external_host)
             assert host not in shard_map
             shard_map[host] = int(port)
-            print_shard(f, host, port)
+            print_shard(nginx_sharding_conf_f, host, port)
             if shard in ['zephyr', 'recurse']:
-                print_shard(f, shard + ".zulipstaging.com", port)
-        f.write('\n')
+                print_shard(nginx_sharding_conf_f, shard + ".zulipstaging.com", port)
+        nginx_sharding_conf_f.write('\n')
 
-with open('/etc/zulip/sharding.json', 'w') as f:
-    f.write(json.dumps(shard_map) + '\n')
+    sharding_json_f.write(json.dumps(shard_map) + '\n')
