@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from zerver.decorator import authenticated_json_view, authenticated_rest_api_view, \
     process_as_post, authenticated_uploads_api_view, \
     ReturnT
+from zerver.lib.rate_limiter import TornadoInMemoryRateLimiterBackend
 from zerver.lib.response import json_method_not_allowed, json_unauthorized
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.conf import settings
@@ -124,9 +125,11 @@ def rest_dispatch(request: HttpRequest, **kwargs: Any) -> HttpResponse:
         # /json views (web client) validate with a session token (cookie)
         elif not request.path.startswith("/api") and request.user.is_authenticated:
             # Authenticated via sessions framework, only CSRF check needed
-            auth_kwargs = {}
+            auth_kwargs = {}  # type: Dict[str, Any]
             if 'override_api_url_scheme' in view_flags:
                 auth_kwargs["skip_rate_limiting"] = True
+            if 'use_in_memory_rate_limiter' in view_flags:
+                auth_kwargs['rate_limiter_backend'] = TornadoInMemoryRateLimiterBackend
             target_function = csrf_protect(authenticated_json_view(target_function, **auth_kwargs))
 
         # most clients (mobile, bots, etc) use HTTP Basic Auth and REST calls, where instead of
@@ -134,9 +137,11 @@ def rest_dispatch(request: HttpRequest, **kwargs: Any) -> HttpResponse:
         elif request.META.get('HTTP_AUTHORIZATION', None):
             # Wrap function with decorator to authenticate the user before
             # proceeding
-            view_kwargs = {}
+            view_kwargs = {}  # type: Dict[str, Any]
             if 'allow_incoming_webhooks' in view_flags:
                 view_kwargs['is_webhook'] = True
+            if 'use_in_memory_rate_limiter' in view_flags:
+                view_kwargs['rate_limiter_backend'] = TornadoInMemoryRateLimiterBackend
             target_function = authenticated_rest_api_view(**view_kwargs)(target_function)  # type: ignore # likely mypy bug
         # Pick a way to tell user they're not authed based on how the request was made
         else:

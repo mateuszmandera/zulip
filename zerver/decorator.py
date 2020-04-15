@@ -28,7 +28,7 @@ from zerver.lib.exceptions import JsonableError, ErrorCode, \
 from zerver.lib.types import ViewFuncT
 from zerver.lib.validator import to_non_negative_int
 
-from zerver.lib.rate_limiter import RateLimitedUser
+from zerver.lib.rate_limiter import RateLimitedUser, RateLimiterBackend
 from zerver.lib.request import REQ, has_request_variables
 
 from functools import wraps
@@ -39,7 +39,7 @@ import logging
 from io import BytesIO
 import urllib
 
-from typing import Union, Any, Callable, Dict, Optional, TypeVar, Tuple
+from typing import Union, Any, Callable, Dict, Optional, TypeVar, Type, Tuple
 from zerver.lib.logging_util import log_to_file
 
 # This is a hack to ensure that RemoteZulipServer always exists even
@@ -538,7 +538,9 @@ def authenticated_uploads_api_view(skip_rate_limiting: bool=False) -> Callable[[
 # with that string as the basis for the client string.
 def authenticated_rest_api_view(*, webhook_client_name: Optional[str]=None,
                                 is_webhook: bool=False,
-                                skip_rate_limiting: bool=False) -> Callable[[ViewFuncT], ViewFuncT]:
+                                skip_rate_limiting: bool=False,
+                                rate_limiter_backend: Optional['Type[RateLimiterBackend]']=None
+                                ) -> Callable[[ViewFuncT], ViewFuncT]:
     def _wrapped_view_func(view_func: ViewFuncT) -> ViewFuncT:
         @csrf_exempt
         @wraps(view_func)
@@ -568,7 +570,9 @@ def authenticated_rest_api_view(*, webhook_client_name: Optional[str]=None,
             try:
                 if not skip_rate_limiting:
                     # Apply rate limiting
-                    target_view_func = rate_limit()(view_func)
+                    target_view_func = rate_limit(
+                        rate_limiter_backend=rate_limiter_backend
+                    )(view_func)
                 else:
                     target_view_func = view_func
                 return target_view_func(request, profile, *args, **kwargs)
@@ -623,10 +627,11 @@ def process_as_post(view_func: ViewFuncT) -> ViewFuncT:
 def authenticate_log_and_execute_json(request: HttpRequest,
                                       view_func: ViewFuncT,
                                       *args: Any, skip_rate_limiting: bool = False,
+                                      rate_limiter_backend: Optional['Type[RateLimiterBackend]']=None,
                                       allow_unauthenticated: bool=False,
                                       **kwargs: Any) -> HttpResponse:
     if not skip_rate_limiting:
-        limited_view_func = rate_limit()(view_func)
+        limited_view_func = rate_limit(rate_limiter_backend=rate_limiter_backend)(view_func)
     else:
         limited_view_func = view_func
 
@@ -662,12 +667,14 @@ def authenticated_json_post_view(view_func: ViewFuncT) -> ViewFuncT:
     return _wrapped_view_func  # type: ignore # https://github.com/python/mypy/issues/1927
 
 def authenticated_json_view(view_func: ViewFuncT, skip_rate_limiting: bool=False,
+                            rate_limiter_backend: Optional['Type[RateLimiterBackend]']=None,
                             allow_unauthenticated: bool=False) -> ViewFuncT:
     @wraps(view_func)
     def _wrapped_view_func(request: HttpRequest,
                            *args: Any, **kwargs: Any) -> HttpResponse:
         kwargs["skip_rate_limiting"] = skip_rate_limiting
         kwargs["allow_unauthenticated"] = allow_unauthenticated
+        kwargs["rate_limiter_backend"] = rate_limiter_backend
         return authenticate_log_and_execute_json(request, view_func, *args, **kwargs)
     return _wrapped_view_func  # type: ignore # https://github.com/python/mypy/issues/1927
 
@@ -739,14 +746,17 @@ def statsd_increment(counter: str, val: int=1,
         return wrapped_func
     return wrapper
 
-def rate_limit_user(request: HttpRequest, user: UserProfile, domain: str) -> None:
+def rate_limit_user(request: HttpRequest, user: UserProfile, domain: str,
+                    backend: Optional['Type[RateLimiterBackend]']=None) -> None:
     """Returns whether or not a user was rate limited. Will raise a RateLimited exception
     if the user has been rate limited, otherwise returns and modifies request to contain
     the rate limit information"""
 
-    RateLimitedUser(user, domain=domain).rate_limit_request(request)
+    RateLimitedUser(user, domain=domain, backend=backend).rate_limit_request(request)
 
-def rate_limit(domain: str='api_by_user') -> Callable[[ViewFuncT], ViewFuncT]:
+def rate_limit(domain: str='api_by_user',
+               rate_limiter_backend: Optional['Type[RateLimiterBackend]']=None
+               ) -> Callable[[ViewFuncT], ViewFuncT]:
     """Rate-limits a view. Takes an optional 'domain' param if you wish to
     rate limit different types of API calls independently.
 
@@ -784,7 +794,7 @@ def rate_limit(domain: str='api_by_user') -> Callable[[ViewFuncT], ViewFuncT]:
                 return func(request, *args, **kwargs)
 
             # Rate-limiting data is stored in redis
-            rate_limit_user(request, user, domain)
+            rate_limit_user(request, user, domain, backend=rate_limiter_backend)
 
             return func(request, *args, **kwargs)
         return wrapped_func  # type: ignore # https://github.com/python/mypy/issues/1927

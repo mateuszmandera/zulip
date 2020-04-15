@@ -32,8 +32,6 @@ class RateLimitedObject(ABC):
     def __init__(self, backend: Optional['Type[RateLimiterBackend]']=None) -> None:
         if backend is not None:
             self.backend = backend  # type: Type[RateLimiterBackend]
-        elif settings.RUNNING_INSIDE_TORNADO:
-            self.backend = TornadoInMemoryRateLimiterBackend
         else:
             self.backend = RedisRateLimiterBackend
 
@@ -108,10 +106,11 @@ class RateLimitedObject(ABC):
         pass
 
 class RateLimitedUser(RateLimitedObject):
-    def __init__(self, user: UserProfile, domain: str='api_by_user') -> None:
+    def __init__(self, user: UserProfile, domain: str='api_by_user',
+                 backend: Optional['Type[RateLimiterBackend]']=None) -> None:
         self.user = user
         self.domain = domain
-        super().__init__()
+        super().__init__(backend=backend)
 
     def key(self) -> str:
         return "{}:{}:{}".format(type(self).__name__, self.user.id, self.domain)

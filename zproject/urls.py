@@ -367,12 +367,13 @@ v1_api_and_json_patterns = [
 
     # used to register for an event queue in tornado
     url(r'^register$', rest_dispatch,
-        {'POST': 'zerver.views.events_register.events_register_backend'}),
+        {'POST': ('zerver.views.events_register.events_register_backend',
+                  {'use_in_memory_rate_limiter'})}),
 
     # events -> zerver.tornado.views
     url(r'^events$', rest_dispatch,
-        {'GET': 'zerver.tornado.views.get_events',
-         'DELETE': 'zerver.tornado.views.cleanup_event_queue'}),
+        {'GET': ('zerver.tornado.views.get_events', {'use_in_memory_rate_limiter'}),
+         'DELETE': ('zerver.tornado.views.cleanup_event_queue', {'use_in_memory_rate_limiter'})}),
 
     # report -> zerver.views.report
     #

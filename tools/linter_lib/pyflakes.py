@@ -25,6 +25,12 @@ def check_pyflakes(files, options):
 
         # Sphinx adds `tags` specially to the environment when running conf.py.
         ("docs/conf.py", "undefined name 'tags'"),
+
+        # decorator.py needs to use type declaration Optional['Type[RateLimiterBackend']], which
+        # doesn't get detected as "use" of these objects by pyflakes. The '' can't be removed from
+        # the declaration until we drop support for python 3.5, as Optional[Type[...]] causes an exception.
+        ("zerver/decorator.py", "'zerver.lib.rate_limiter.RateLimiterBackend' imported but unused"),
+        ("zerver/decorator.py", "'typing.Type' imported but unused"),
     ]
     if options.full:
         suppress_patterns = []
