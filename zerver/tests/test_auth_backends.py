@@ -57,11 +57,11 @@ from zerver.signals import JUST_CREATED_THRESHOLD
 
 from confirmation.models import Confirmation, create_confirmation_link
 
-from zproject.backends import ZulipDummyBackend, EmailAuthBackend, \
+from zproject.backends import ZulipDummyBackend, EmailAuthBackend, AppleAuthBackend, \
     GoogleAuthBackend, ZulipRemoteUserBackend, ZulipLDAPAuthBackend, \
     ZulipLDAPUserPopulator, DevAuthBackend, GitHubAuthBackend, GitLabAuthBackend, ZulipAuthMixin, \
     dev_auth_enabled, password_auth_enabled, github_auth_enabled, gitlab_auth_enabled, \
-    google_auth_enabled, require_email_format_usernames, AUTH_BACKEND_NAME_MAP, \
+    apple_auth_enabled, google_auth_enabled, require_email_format_usernames, AUTH_BACKEND_NAME_MAP, \
     ZulipLDAPConfigurationError, ZulipLDAPExceptionNoMatchingLDAPUser, ZulipLDAPExceptionOutsideDomain, \
     ZulipLDAPException, query_ldap, sync_user_from_ldap, SocialAuthMixin, \
     PopulateUserLDAPError, SAMLAuthBackend, saml_auth_enabled, email_belongs_to_ldap, \
@@ -1660,6 +1660,203 @@ class SAMLAuthBackendTest(SocialAuthBase):
                 "SAML_REQUIRE_LIMIT_TO_SUBDOMAINS is enabled and the following " +
                 "IdPs don't have limit_to_subdomains specified and will be ignored: " +
                 "['test_idp']")
+
+class AppleIdAuthBackendTest(SocialAuthBase):
+    __unittest_skip__ = False
+
+    BACKEND_CLASS = AppleAuthBackend
+    CLIENT_KEY_SETTING = "SOCIAL_AUTH_APPLE_KEY"
+    LOGIN_URL = "/accounts/login/social/apple"
+    SIGNUP_URL = "/accounts/register/social/apple"
+    AUTHORIZATION_URL = "https://appleid.apple.com/auth/authorize"
+    ACCESS_TOKEN_URL = "https://appleid.apple.com/auth/token"
+    AUTH_FINISH_URL = "/complete/apple/"
+    CONFIG_ERROR_URL = "/config-error/apple"
+
+    def social_auth_test(self, account_data_dict: Dict[str, str],
+                         *, subdomain: Optional[str]=None,
+                         mobile_flow_otp: Optional[str]=None,
+                         desktop_flow_otp: Optional[str]=None,
+                         is_signup: bool=False,
+                         next: str='',
+                         multiuse_object_key: str='',
+                         **extra_data: Any) -> HttpResponse:
+        url, headers = self.prepare_login_url_and_headers(
+            subdomain, mobile_flow_otp, desktop_flow_otp, is_signup, next,
+            multiuse_object_key
+        )
+
+        result = self.client_get(url, **headers)
+
+        expected_result_url_prefix = 'http://testserver/login/%s/' % (self.backend.name,)
+        if settings.SOCIAL_AUTH_SUBDOMAIN is not None:
+            expected_result_url_prefix = ('http://%s.testserver/login/%s/' %
+                                          (settings.SOCIAL_AUTH_SUBDOMAIN, self.backend.name,))
+
+        if result.status_code != 302 or not result.url.startswith(expected_result_url_prefix):
+            return result
+
+        result = self.client_get(result.url, **headers)
+        self.assertEqual(result.status_code, 302)
+        assert self.AUTHORIZATION_URL in result.url
+
+        self.client.cookies = result.cookies
+
+        # id_token in a JSON Web Token that contains the user’s identity information.
+        token_data_dict = {
+            'access_token': 'foobar',
+            'expires_in': time.time() + 60*5,
+            'id_token': self.generate_id_token(account_data_dict),
+            'token_type': 'bearer'
+        }
+
+        parsed_url = urllib.parse.urlparse(result.url)
+        state = urllib.parse.parse_qs(parsed_url.query)['state']
+
+        with responses.RequestsMock(assert_all_requests_are_fired=False) as requests_mock:
+            requests_mock.add(
+                requests_mock.POST,
+                self.ACCESS_TOKEN_URL,
+                match_querystring=False,
+                status=200,
+                body=json.dumps(token_data_dict))
+
+            # The below mocked function usually gets jwk's from
+            # https://appleid.apple.com/auth/keys. `decode_token`
+            # finds the right jwk with help of `kid` obtained with
+            # `jwt.get_unverified_header`. Here, because we generate
+            # `id_token` we have the right public key to decode it.
+            # This mock return's that public key in jwk format.
+            with mock.patch('social_core.backends.apple.AppleIdAuth.get_apple_jwk',
+                            return_value=settings.APPLE_JWK):
+                result = self.client_post(self.AUTH_FINISH_URL,
+                                          dict(state=state), **headers)
+        return result
+
+    def generate_id_token(self, account_data_dict: Dict[str, str]) -> str:
+        payload = account_data_dict
+
+        # This is important because PSA decodes `id_token`
+        # with `SOCIAL_AUTH_APPLE_CLIENT` as `audience`
+        payload['aud'] = settings.SOCIAL_AUTH_APPLE_CLIENT
+
+        private_key = settings.APPLE_ID_TOKEN_GENERATION_KEY
+
+        # `jwt.encode` gives byte string, so `.decode('utf-8)
+        # is used to convert it to a sring.
+        id_token = jwt.encode(payload, private_key, algorithm='RS256').decode('utf-8')
+
+        return id_token
+
+    def get_account_data_dict(self, email: str, name: str) -> Dict[str, Any]:
+        name_parts = name.split(' ')
+        first_name = name_parts[0]
+        last_name = ''
+        if (len(name_parts) > 0):
+            last_name = name_parts[-1]
+        name_dict = {'firstName': first_name, 'lastName': last_name}
+        return dict(email=email, name=name_dict, email_verified=True)
+
+    def test_apple_auth_enabled(self) -> None:
+        with self.settings(AUTHENTICATION_BACKENDS=('zproject.backends.AppleAuthBackend',)):
+            self.assertTrue(apple_auth_enabled())
+
+    def test_get_apple_locale(self) -> None:
+        language_locale = [('ar', 'ar_SA'), ('ca', 'ca_ES'), ('cs', 'cs_CZ'),
+                           ('da', 'da_DK'), ('de', 'de_DE'), ('el', 'el_GR'),
+                           ('en', 'en_US'), ('es', 'es_ES'), ('fi', 'fi_FI'),
+                           ('fr', 'fr_FR'), ('hr', 'hr_HR'), ('hu', 'hu_HU'),
+                           ('id', 'id_ID'), ('it', 'it_IT'), ('iw', 'iw_IL'),
+                           ('ja', 'ja_JP'), ('ko', 'ko_KR'), ('ms', 'ms_MY'),
+                           ('nl', 'nl_NL'), ('no', 'no_NO'), ('pl', 'pl_PL'),
+                           ('pt', 'pt_PT'), ('ro', 'ro_RO'), ('ru', 'ru_RU'),
+                           ('sk', 'sk_SK'), ('sv', 'sv_SE'), ('th', 'th_TH'),
+                           ('tr', 'tr_TR'), ('uk', 'uk_UA'), ('vi', 'vi_VI'),
+                           ('zh', 'zh_CN')]
+
+        for language_code, locale in language_locale:
+            self.assertEqual(AppleAuthBackend.get_apple_locale(language_code), locale)
+
+        # return 'en_US' if invalid `language_code` is given.
+        self.assertEqual(AppleAuthBackend.get_apple_locale(':)'), 'en_US')
+
+    def test_auth_registration_with_no_name_sent_from_apple(self) -> None:
+        """
+        Apple doesn't send user's name when the user fails to register
+        the first time, In that case also we want to allow the user to
+        create account, but for other backends we don't allow that.
+        """
+        email = "newuser@zulip.com"
+        subdomain = "zulip"
+        realm = get_realm("zulip")
+        account_data_dict = self.get_account_data_dict(email=email, name='')
+        result = self.social_auth_test(account_data_dict,
+                                       expect_choose_email_screen=True,
+                                       subdomain=subdomain, is_signup=True)
+        # The user is taken to registration form, where the "Full Name"
+        # entered in that field.
+        # Almost all of the below code is a copy of `stage_two_of_registration`
+        # except that it does not check if `expected_final_name`
+        # is populated in registration form as we do not expect that
+        # field to be filled since we do not get name data from apple.
+        data = load_subdomain_token(result)
+        self.assertEqual(data['email'], email)
+        self.assertEqual(data['full_name'], '')
+        self.assertEqual(data['subdomain'], 'zulip')
+        self.assertEqual(result.status_code, 302)
+        parsed_url = urllib.parse.urlparse(result.url)
+        uri = "{}://{}{}".format(parsed_url.scheme, parsed_url.netloc,
+                                 parsed_url.path)
+        self.assertTrue(uri.startswith('http://zulip.testserver/accounts/login/subdomain/'))
+
+        result = self.client_get(result.url)
+
+        self.assertEqual(result.status_code, 302)
+        confirmation = Confirmation.objects.all().last()
+        confirmation_key = confirmation.confirmation_key
+        self.assertIn('do_confirm/' + confirmation_key, result.url)
+        do_confirm_url = result.url
+        result = self.client_get(do_confirm_url, name='')
+        self.assert_in_response('action="/accounts/register/"', result)
+        confirmation_data = {"from_confirmation": "1",
+                             "key": confirmation_key}
+        result = self.client_post('/accounts/register/', confirmation_data)
+        self.assert_in_response("We just need you to do one last thing", result)
+
+        # Verify that the user is asked for name but not password
+        self.assert_not_in_success_response(['id_password'], result)
+        self.assert_in_success_response(['id_full_name'], result)
+
+        # Click confirm registration button.
+        result = self.client_post(
+            '/accounts/register/',
+            {'full_name': "Full Name",
+                'key': confirmation_key,
+                'terms': True})
+
+        self.assertEqual(result.status_code, 302)
+
+        user_profile = get_user_by_delivery_email(email, realm)
+        self.assert_logged_in_user_id(user_profile.id)
+        self.assertEqual(user_profile.full_name, "Full Name")
+
+        self.assertFalse(user_profile.has_usable_password())
+
+    def test_validate_state(self) -> None:
+        with mock.patch('zproject.backends.logging.info') as m:
+
+            # check if auth fails if no state value is sent.
+            result = self.client_post('/complete/apple/')
+            self.assertEqual(result.status_code, 302)
+            self.assertIn('login', result.url)
+            m.assert_called_with("Sign in with Apple failed: missing state parameter.")
+
+            # Check if auth fails when a state sent has no valid data stored in redis.
+            fake_state = "fa42e4ccdb630f0070c1daab70ad198d8786d4b639cd7a1b4db4d5a13c623060"
+            result = self.client_post('/complete/apple/', {'state': fake_state})
+            self.assertEqual(result.status_code, 302)
+            self.assertIn('login', result.url)
+            m.assert_called_with("Sign in with Apple failed: bad state token.")
 
 class GitHubAuthBackendTest(SocialAuthBase):
     __unittest_skip__ = False
