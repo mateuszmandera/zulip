@@ -3900,7 +3900,10 @@ def do_update_user_activity(user_profile_id: int,
         activity.save(update_fields=["last_visit", "count"])
 
 def send_presence_changed(user_profile: UserProfile, presence: UserPresence) -> None:
-    presence_dict = presence.to_dict()
+    # TODO: This needs to be rewritten for the new API.
+    # was previously presence.to_dict().
+    # May be an ugly transition since mobile handles these events.
+    presence_dict = {'client': 'website'}
     event = dict(type="presence",
                  email=user_profile.email,
                  user_id=user_profile.id,
@@ -3927,39 +3930,36 @@ def do_update_user_presence(user_profile: UserProfile,
                             status: int) -> None:
     client = consolidate_client(client)
 
+    # TODO: While we probably DO want creating an account to
+    # automatically create a first `UserPresence` object with
+    # last_connected_time and last_active_time as the current time,
+    # our presence tests don't understand this, and it'd be perhaps
+    # wrong for some cases of account creation via the API.  So we may
+    # want a "never" value here as the default.
     defaults = dict(
-        timestamp=log_time,
-        status=status,
+        last_active_time=log_time,
+        last_connected_time=log_time,
         realm_id=user_profile.realm_id
     )
 
     (presence, created) = UserPresence.objects.get_or_create(
         user_profile = user_profile,
-        client = client,
         defaults = defaults
     )
 
-    stale_status = (log_time - presence.timestamp) > datetime.timedelta(minutes=1, seconds=10)
-    was_idle = presence.status == UserPresence.IDLE
-    became_online = (status == UserPresence.ACTIVE) and (stale_status or was_idle)
+    now_online = (log_time - presence.last_active_time) > datetime.timedelta(minutes=5)
+    became_online = status == UserPresence.LEGACY_STATUS_ACTIVE_INT and now_online
 
-    # If an object was created, it has already been saved.
-    #
-    # We suppress changes from ACTIVE to IDLE before stale_status is reached;
-    # this protects us from the user having two clients open: one active, the
-    # other idle. Without this check, we would constantly toggle their status
-    # between the two states.
-    if not created and stale_status or was_idle or status == presence.status:
-        # The following block attempts to only update the "status"
-        # field in the event that it actually changed.  This is
-        # important to avoid flushing the UserPresence cache when the
-        # data it would return to a client hasn't actually changed
-        # (see the UserPresence post_save hook for details).
-        presence.timestamp = log_time
-        update_fields = ["timestamp"]
-        if presence.status != status:
-            presence.status = status
-            update_fields.append("status")
+    update_fields = []
+    # This check is to prevent updating `last_connected_time` several
+    # times per minute with multiple connected browser windows.
+    if not created and log_time - presence.last_active_time > datetime.timedelta(seconds=55):
+        presence.last_connected_time = log_time
+        update_fields.append("last_connected_time")
+    if not created and status == UserPresence.LEGACY_STATUS_ACTIVE_INT:
+        presence.last_active_time = log_time
+        update_fields.append("last_active_time")
+    if len(update_fields) > 0:
         presence.save(update_fields=update_fields)
 
     if not user_profile.realm.presence_disabled and (created or became_online):
@@ -4925,9 +4925,8 @@ def filter_presence_idle_user_ids(user_ids: Set[int]) -> List[int]:
     recent = timezone_now() - datetime.timedelta(seconds=OFFLINE_THRESHOLD_SECS)
     rows = UserPresence.objects.filter(
         user_profile_id__in=user_ids,
-        status=UserPresence.ACTIVE,
-        timestamp__gte=recent
-    ).exclude(client__name="ZulipMobile").distinct('user_profile_id').values('user_profile_id')
+        last_active_time__gte=recent,
+    ).distinct('user_profile_id').values('user_profile_id')
     active_user_ids = {row['user_profile_id'] for row in rows}
     idle_user_ids = user_ids - active_user_ids
     return sorted(list(idle_user_ids))
