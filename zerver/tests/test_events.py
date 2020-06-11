@@ -1,6 +1,7 @@
 # See https://zulip.readthedocs.io/en/latest/subsystems/events-system.html for
 # high-level documentation on how this system works.
 import copy
+import datetime
 import sys
 import time
 from io import StringIO
@@ -712,35 +713,39 @@ class NormalActionsTest(BaseAction):
 
         email_field = ('email', check_string)
 
-        events = self.verify_action(
-            lambda: do_update_user_presence(
-                self.user_profile,
-                get_client("website"),
-                timezone_now(),
-                UserPresence.ACTIVE),
+        events = self.verify_action(lambda: do_update_user_presence(
+            self.user_profile, get_client("website"),
+            timezone_now(), UserPresence.LEGACY_STATUS_ACTIVE_INT),
             slim_presence=False)
         schema_checker = check_events_dict([*fields, email_field])
         schema_checker('events[0]', events[0])
 
-        events = self.verify_action(
-            lambda: do_update_user_presence(
-                self.example_user('cordelia'),
-                get_client("website"),
-                timezone_now(),
-                UserPresence.ACTIVE),
+        events = self.verify_action(lambda: do_update_user_presence(
+            self.example_user('cordelia'), get_client("website"),
+            timezone_now(), UserPresence.LEGACY_STATUS_ACTIVE_INT),
             slim_presence=True)
         schema_checker = check_events_dict(fields)
         schema_checker('events[0]', events[0])
 
     def test_presence_events_multiple_clients(self) -> None:
+        now = timezone_now()
+        initial_presence = now - datetime.timedelta(days=365)
+        UserPresence.objects.create(
+            user_profile=self.user_profile, realm=self.user_profile.realm,
+            last_active_time=initial_presence,
+            last_connected_time=initial_presence
+        )
+
         schema_checker_android = check_events_dict([
             ('type', equals('presence')),
             ('email', check_string),
             ('user_id', check_int),
             ('server_timestamp', check_float),
             ('presence', check_dict_only([
-                ('ZulipAndroid/1.0', check_dict_only([
-                    ('status', equals('idle')),
+                # We no longer store information about the client and we simply
+                # set the field to 'website' for backwards compatibility.
+                ('website', check_dict_only([
+                    ('status', equals('active')),
                     ('timestamp', check_int),
                     ('client', check_string),
                     ('pushable', check_bool),
@@ -750,18 +755,20 @@ class NormalActionsTest(BaseAction):
 
         self.api_post(self.user_profile, "/api/v1/users/me/presence", {'status': 'idle'},
                       HTTP_USER_AGENT="ZulipAndroid/1.0")
+        self.verify_action(lambda: do_update_user_presence(
+            self.user_profile, get_client("website"), timezone_now(), UserPresence.LEGACY_STATUS_ACTIVE_INT))
         self.verify_action(
-            lambda: do_update_user_presence(
-                self.user_profile,
-                get_client("website"),
-                timezone_now(),
-                UserPresence.ACTIVE))
+            lambda: do_update_user_presence(self.user_profile, get_client("ZulipAndroid/1.0"),
+                                            timezone_now(), UserPresence.LEGACY_STATUS_IDLE_INT),
+            state_change_expected=False,
+            num_events=0
+        )
         events = self.verify_action(
-            lambda: do_update_user_presence(
-                self.user_profile,
-                get_client("ZulipAndroid/1.0"),
-                timezone_now(),
-                UserPresence.IDLE))
+            lambda: do_update_user_presence(self.user_profile, get_client("ZulipAndroid/1.0"),
+                                            timezone_now() + datetime.timedelta(seconds=301),
+                                            UserPresence.LEGACY_STATUS_ACTIVE_INT)
+        )
+
         schema_checker_android('events[0]', events[0])
 
     def test_register_events(self) -> None:

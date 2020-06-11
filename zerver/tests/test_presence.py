@@ -6,7 +6,7 @@ from unittest import mock
 from django.utils.timezone import now as timezone_now
 
 from zerver.lib.actions import do_deactivate_user
-from zerver.lib.presence import get_status_dict_by_realm
+from zerver.lib.presence import format_legacy_presence_dict, get_status_dict_by_realm
 from zerver.lib.statistics import seconds_usage_between
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.lib.test_helpers import make_client, queries_captured, reset_emails_in_zulip_realm
@@ -19,6 +19,7 @@ from zerver.models import (
     UserPresence,
     UserProfile,
     flush_per_request_caches,
+    get_realm,
 )
 
 
@@ -98,11 +99,13 @@ class UserPresenceModelTests(ZulipTestCase):
         presence_dct = get_status_dict_by_realm(user_profile.realm_id, slim_presence)
         self.assertEqual(len(presence_dct), 1)
         info = presence_dct[str(user_profile.id)]
-        self.assertEqual(set(info.keys()), {'active_timestamp'})
+        self.assertEqual(set(info.keys()), {'active_timestamp', 'idle_timestamp'})
 
         def back_date(num_weeks: int) -> None:
-            user_presence = UserPresence.objects.filter(user_profile=user_profile)[0]
-            user_presence.timestamp = timezone_now() - datetime.timedelta(weeks=num_weeks)
+            user_presence = UserPresence.objects.get(user_profile=user_profile)
+            backdated_timestamp = timezone_now() - datetime.timedelta(weeks=num_weeks)
+            user_presence.last_active_time = backdated_timestamp
+            user_presence.last_connected_time = backdated_timestamp
             user_presence.save()
 
         # Simulate the presence being a week old first.  Nothing should change.
@@ -115,7 +118,9 @@ class UserPresenceModelTests(ZulipTestCase):
         presence_dct = get_status_dict_by_realm(user_profile.realm_id)
         self.assertEqual(len(presence_dct), 0)
 
-    def test_push_tokens(self) -> None:
+    def test_pushable_always_false(self) -> None:
+        # This field was never used by clients of the legacy API, so we
+        # just want to have it always set to False for API format compatibility.
         UserPresence.objects.all().delete()
 
         user_profile = self.example_user('hamlet')
@@ -141,9 +146,24 @@ class UserPresenceModelTests(ZulipTestCase):
             user=user_profile,
             kind=PushDeviceToken.APNS,
         )
-        self.assertTrue(pushable())
+        self.assertFalse(pushable())
 
 class UserPresenceTests(ZulipTestCase):
+    def setUp(self) -> None:
+        """
+        Create some initial, old presence data to make the intended set up
+        simpler for the tests.
+        """
+        realm = get_realm("zulip")
+        now = timezone_now()
+        initial_presence = now - timedelta(days=365)
+        UserPresence.objects.bulk_create(
+            [UserPresence(user_profile=user_profile, realm=user_profile.realm,
+                          last_active_time=initial_presence,
+                          last_connected_time=initial_presence)
+             for user_profile in UserProfile.objects.filter(realm=realm)]
+        )
+
     def test_invalid_presence(self) -> None:
         user = self.example_user("hamlet")
         self.login_user(user)
@@ -179,8 +199,8 @@ class UserPresenceTests(ZulipTestCase):
         hamlet_info = presences[str(hamlet.id)]
         othello_info = presences[str(othello.id)]
 
-        self.assertEqual(set(hamlet_info.keys()), {'idle_timestamp'})
-        self.assertEqual(set(othello_info.keys()), {'idle_timestamp'})
+        self.assertEqual(set(hamlet_info.keys()), {'idle_timestamp', 'active_timestamp'})
+        self.assertEqual(set(othello_info.keys()), {'idle_timestamp', 'active_timestamp'})
 
         self.assertGreaterEqual(
             othello_info['idle_timestamp'],
@@ -233,12 +253,12 @@ class UserPresenceTests(ZulipTestCase):
 
         self.assertEqual(
             set(othello_info.keys()),
-            {'active_timestamp'},
+            {'active_timestamp', 'idle_timestamp'},
         )
 
         self.assertEqual(
             set(hamlet_info.keys()),
-            {'active_timestamp'},
+            {'active_timestamp', 'idle_timestamp'},
         )
 
         self.assertGreaterEqual(
@@ -324,16 +344,29 @@ class UserPresenceTests(ZulipTestCase):
         from zerver.lib.actions import filter_presence_idle_user_ids
         self.login('hamlet')
 
+        # Ensure we're starting with a clean slate.
+        UserPresence.objects.all().delete()
         self.assertEqual(filter_presence_idle_user_ids({user_profile.id}), [user_profile.id])
+
+        # Create a first presence for the user. It's the first one, so it'll initialize both last_active_time
+        # and last_connected time with the current time. Thus the user will be considered active and won't
+        # get filtered.
+        self.client_post("/json/users/me/presence", {'status': 'idle'})
+        self.assertEqual(filter_presence_idle_user_ids({user_profile.id}), [])
+
+        # Make last_active_time be older than OFFLINE_THRESHOLD_SECS constant from presence.js. That should
+        # get the user filtered.
+        UserPresence.objects.filter(user_profile=user_profile) \
+            .update(last_active_time=timezone_now() - timedelta(seconds=141))
+        self.assertEqual(filter_presence_idle_user_ids({user_profile.id}), [user_profile.id])
+
+        # Sending an idle presence doesn't change anything for filtering.
         self.client_post("/json/users/me/presence", {'status': 'idle'})
         self.assertEqual(filter_presence_idle_user_ids({user_profile.id}), [user_profile.id])
 
-        # Active presence from the mobile app doesn't count
+        # Active presence from the mobile app should count (in the old API it didn't)
         self.client_post("/json/users/me/presence", {'status': 'active'},
                          HTTP_USER_AGENT="ZulipMobile/1.0")
-        self.assertEqual(filter_presence_idle_user_ids({user_profile.id}), [user_profile.id])
-
-        self.client_post("/json/users/me/presence", {'status': 'active'})
         self.assertEqual(filter_presence_idle_user_ids({user_profile.id}), [])
 
     def test_no_mit(self) -> None:
@@ -455,7 +488,7 @@ class SingleUserPresenceTests(ZulipTestCase):
         result_dict = result.json()
         self.assertEqual(
             set(result_dict['presence'].keys()),
-            {"ZulipAndroid", "website", "aggregated"})
+            {"website", "aggregated"})
         self.assertEqual(set(result_dict['presence']['website'].keys()), {"status", "timestamp"})
 
     def test_ping_only(self) -> None:
@@ -473,6 +506,11 @@ class UserPresenceAggregationTests(ZulipTestCase):
                                             validate_time: datetime.datetime) -> Dict[str, Dict[str, Any]]:
         self.login_user(user)
         timezone_util = 'zerver.views.presence.timezone_now'
+        # First create some initial, old presence to avoid the details of the edge case of initial
+        # presence creation messing with the intended setup.
+        with mock.patch(timezone_util, return_value=validate_time - datetime.timedelta(days=365)):
+            self.client_post("/json/users/me/presence", {'status': status})
+
         with mock.patch(timezone_util, return_value=validate_time - datetime.timedelta(seconds=5)):
             self.client_post("/json/users/me/presence", {'status': status})
         with mock.patch(timezone_util, return_value=validate_time - datetime.timedelta(seconds=2)):
@@ -487,7 +525,9 @@ class UserPresenceAggregationTests(ZulipTestCase):
             {
                 'status': status,
                 'timestamp': datetime_to_timestamp(validate_time - datetime.timedelta(seconds=2)),
-                'client': 'ZulipAndroid',
+                # We no longer store the client information, but keep the field in these dicts,
+                # with the value 'website' for backwards compatibility.
+                'client': 'website',
             },
         )
 
@@ -508,7 +548,7 @@ class UserPresenceAggregationTests(ZulipTestCase):
             {
                 'status': 'active',
                 'timestamp': datetime_to_timestamp(validate_time - datetime.timedelta(seconds=1)),
-                'client': 'ZulipTestDev',
+                'client': 'website',  # This fields is no longer used and is permamenently set to 'website'.
             },
         )
 
@@ -542,11 +582,11 @@ class UserPresenceAggregationTests(ZulipTestCase):
         user = self.example_user("othello")
         self.login_user(user)
         validate_time = timezone_now()
+        result_dict = self._send_presence_for_aggregated_tests(user, 'idle', validate_time)
         with mock.patch('zerver.views.presence.timezone_now',
                         return_value=validate_time - datetime.timedelta(seconds=3)):
             self.api_post(user, "/api/v1/users/me/presence", {'status': 'active'},
                           HTTP_USER_AGENT="ZulipTestDev/1.0")
-        result_dict = self._send_presence_for_aggregated_tests(user, 'idle', validate_time)
         self.assertDictEqual(
             result_dict['presence']['aggregated'],
             {
@@ -628,3 +668,39 @@ class GetRealmStatusesTest(ZulipTestCase):
         self.assert_json_success(result)
         json = result.json()
         self.assertEqual(set(json['presences'].keys()), {str(hamlet.id)})
+
+class FormatLegacyPresenceDictTest(ZulipTestCase):
+    def test_format_legacy_presence_dict(self) -> None:
+        hamlet = self.example_user("hamlet")
+        now = timezone_now()
+        recently = now - timedelta(seconds=50)
+        a_while_ago = now - timedelta(minutes=3)
+        presence = UserPresence(user_profile=hamlet, realm=hamlet.realm,
+                                last_active_time=now, last_connected_time=now)
+        self.assertEqual(format_legacy_presence_dict(presence),
+                         dict(
+                             client='website',
+                             status=UserPresence.LEGACY_STATUS_ACTIVE,
+                             timestamp=datetime_to_timestamp(now),
+                             pushable=False)
+                         )
+
+        presence = UserPresence(user_profile=hamlet, realm=hamlet.realm,
+                                last_active_time=recently, last_connected_time=now)
+        self.assertEqual(format_legacy_presence_dict(presence),
+                         dict(
+                             client='website',
+                             status=UserPresence.LEGACY_STATUS_ACTIVE,
+                             timestamp=datetime_to_timestamp(recently),
+                             pushable=False)
+                         )
+
+        presence = UserPresence(user_profile=hamlet, realm=hamlet.realm,
+                                last_active_time=a_while_ago, last_connected_time=now)
+        self.assertEqual(format_legacy_presence_dict(presence),
+                         dict(
+                             client='website',
+                             status=UserPresence.LEGACY_STATUS_IDLE,
+                             timestamp=datetime_to_timestamp(now),
+                             pushable=False)
+                         )

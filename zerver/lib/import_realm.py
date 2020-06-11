@@ -352,6 +352,9 @@ def idseq(model_class: Any) -> str:
         return 'zerver_botuserstatedata_id_seq'
     elif model_class == BotConfigData:
         return 'zerver_botuserconfigdata_id_seq'
+    elif model_class == UserPresence:
+        return 'zerver_userpresencenew_id_seq'
+
     return f'{model_class._meta.db_table}_id_seq'
 
 def allocate_ids(model_class: Any, count: int) -> List[int]:
@@ -998,7 +1001,6 @@ def do_import_realm(import_dir: Path, subdomain: str, processes: int=1) -> Realm
 
     fix_datetime_fields(data, 'zerver_userpresence')
     re_map_foreign_keys(data, 'zerver_userpresence', 'user_profile', related_table="user_profile")
-    re_map_foreign_keys(data, 'zerver_userpresence', 'client', related_table='client')
     re_map_foreign_keys(data, 'zerver_userpresence', 'realm', related_table="realm")
     update_model_ids(UserPresence, data, 'user_presence')
     bulk_import_model(data, UserPresence)

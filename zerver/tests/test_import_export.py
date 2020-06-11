@@ -712,7 +712,7 @@ class ImportExportTest(ZulipTestCase):
             recipient_id=stream.recipient.id,
             topic_name='Verona2')
 
-        do_update_user_presence(sample_user, get_client("website"), timezone_now(), UserPresence.ACTIVE)
+        do_update_user_presence(sample_user, get_client("website"), timezone_now(), UserPresence.LEGACY_STATUS_ACTIVE_INT)
 
         # data to test import of botstoragedata and botconfigdata
         bot_profile = do_create_user(
@@ -976,7 +976,7 @@ class ImportExportTest(ZulipTestCase):
         def get_userpresence_timestamp(r: Realm) -> Set[Any]:
             # It should be sufficient to compare UserPresence timestamps to verify
             # they got exported/imported correctly.
-            return set(UserPresence.objects.filter(realm=r).values_list('timestamp', flat=True))
+            return set(UserPresence.objects.filter(realm=r).values_list('last_active_time', 'last_connected_time'))
 
         assert_realm_values(get_userpresence_timestamp)
 

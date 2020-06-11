@@ -3,7 +3,7 @@ from typing import Dict, List
 
 from django.utils.timezone import now as timezone_now
 
-from zerver.lib.actions import get_active_presence_idle_user_ids, get_client
+from zerver.lib.actions import get_active_presence_idle_user_ids
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.models import (
     Message,
@@ -41,8 +41,8 @@ class MissedMessageTest(ZulipTestCase):
             UserPresence.objects.create(
                 user_profile_id=user.id,
                 realm_id=user.realm_id,
-                client=get_client(client_name),
-                timestamp=when,
+                last_active_time=when,
+                last_connected_time=when
             )
 
         message_type = 'private'
