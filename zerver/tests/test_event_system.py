@@ -1157,7 +1157,7 @@ class TestUserPresenceUpdatesDisabled(ZulipTestCase):
                 self.example_user("cordelia"),
                 get_client("website"),
                 timezone_now(),
-                UserPresence.ACTIVE,
+                UserPresence.LEGACY_STATUS_ACTIVE_INT,
             )
 
         # Now check that if the realm has more than the USER_LIMIT_FOR_SENDING_PRESENCE_UPDATE_EVENTS
@@ -1168,5 +1168,5 @@ class TestUserPresenceUpdatesDisabled(ZulipTestCase):
                     self.example_user("hamlet"),
                     get_client("website"),
                     timezone_now(),
-                    UserPresence.ACTIVE,
+                    UserPresence.LEGACY_STATUS_ACTIVE_INT,
                 )
