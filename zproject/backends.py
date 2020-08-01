@@ -1301,7 +1301,7 @@ def social_auth_finish(backend: Any,
     validate_otp_params(mobile_flow_otp, desktop_flow_otp)
 
     if user_profile is None or user_profile.is_mirror_dummy:
-        is_signup = strategy.session_get('is_signup') == '1'
+        is_signup = strategy.session_get('is_signup') == '1' or backend.should_auto_signup()
     else:
         is_signup = False
 
@@ -1392,6 +1392,9 @@ class SocialAuthMixin(ZulipAuthMixin, ExternalAuthMethod, BaseAuth):
             # interesting enough that we should log a warning.
             self.logger.warning(str(e))
             return None
+
+    def should_auto_signup(self) -> bool:
+        return False
 
     @classmethod
     def dict_representation(cls, realm: Optional[Realm]=None) -> List[ExternalAuthMethodDictT]:
@@ -1974,6 +1977,9 @@ class SAMLAuthBackend(SocialAuthMixin, SAMLAuth):
             result.append(saml_dict)
 
         return result
+
+    def should_auto_signup(self) -> bool:
+        return settings.SAML_AUTO_SIGNUP
 
 def validate_otp_params(mobile_flow_otp: Optional[str]=None,
                         desktop_flow_otp: Optional[str]=None) -> None:

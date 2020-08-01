@@ -274,6 +274,11 @@ SOCIAL_AUTH_SAML_SECURITY_CONFIG: Dict[str, Any] = {
     "authnRequestsSigned": False,
 }
 
+# Enable this setting to automatically create the account and sign in the user
+# (if your organization settings permit it) on their first login without taking them
+# through the extra step of having to confirm they intend to register.
+# SAML_AUTO_SIGNUP = True
+
 # These SAML settings you likely won't need to modify.
 SOCIAL_AUTH_SAML_SP_ENTITY_ID = 'https://' + EXTERNAL_HOST
 SOCIAL_AUTH_SAML_TECHNICAL_CONTACT = {
