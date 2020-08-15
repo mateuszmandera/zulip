@@ -591,6 +591,13 @@ AUTH_LDAP_USER_ATTR_MAP = {
     # who are disabled in LDAP/Active Directory (and reactivate users who are not).
     # See docs for usage details and precise semantics.
     # "userAccountControl": "userAccountControl",
+
+    # This line is for having Zulip only allow a user access to Organizations, which
+    # are defined in this attribute.
+    # For example: A user with "sales" in this attribute will have access to
+    # sales.zulip.example.com but not to it.zulip.example.com
+    # If this attribute is not set it will allow access to all Organizations
+    # "org_membership": "department",
 }
 
 # Whether to automatically deactivate users not found in LDAP. If LDAP
