@@ -8,6 +8,7 @@ from django.http import HttpResponse
 
 from zerver.forms import email_is_not_mit_mailing_list
 from zerver.lib.rate_limiter import (
+    RateLimitedIPAddr,
     RateLimitedUser,
     RateLimiterLockingException,
     add_ratelimit_rule,
@@ -74,6 +75,16 @@ class RateLimitTests(ZulipTestCase):
                                                         "content": content,
                                                         "topic": "whatever"})
 
+    def send_unauthed_api_request(self) -> HttpResponse:
+        result = self.client_get("/json/messages")
+        # We're not making a correct request here, but rate-limiting is supposed
+        # to happen before the request fails due to not being correctly made. Thus
+        # we expect either an 400 error if the request is allowed by the rate limiter,
+        # or 429 if we're above the limit. We don't expect to see other status codes here,
+        # so we assert for safety.
+        self.assertIn(result.status_code, [400, 429])
+        return result
+
     def test_headers(self) -> None:
         user = self.example_user('hamlet')
         RateLimitedUser(user).clear_history()
@@ -93,7 +104,7 @@ class RateLimitTests(ZulipTestCase):
         newlimit = int(result['X-RateLimit-Remaining'])
         self.assertEqual(limit, newlimit + 1)
 
-    def test_hit_ratelimits(self) -> None:
+    def test_hit_ratelimits_as_user(self) -> None:
         user = self.example_user('cordelia')
         RateLimitedUser(user).clear_history()
 
@@ -117,6 +128,35 @@ class RateLimitTests(ZulipTestCase):
             result = self.send_api_message(user, "Good message")
 
             self.assert_json_success(result)
+
+    def test_hit_ratelimits_as_ip(self) -> None:
+        add_ratelimit_rule(1, 5, domain='api_by_ip')
+        try:
+            RateLimitedIPAddr("127.0.0.1").clear_history()
+
+            start_time = time.time()
+            for i in range(6):
+                with mock.patch('time.time', return_value=(start_time + i * 0.1)):
+                    result = self.send_unauthed_api_request()
+
+            self.assertEqual(result.status_code, 429)
+            json = result.json()
+            self.assertEqual(json.get("result"), "error")
+            self.assertIn("API usage exceeded rate limit", json.get("msg"))
+            self.assertEqual(json.get('retry-after'), 0.5)
+            self.assertTrue('Retry-After' in result)
+            self.assertEqual(result['Retry-After'], '0.5')
+
+            # We actually wait a second here, rather than force-clearing our history,
+            # to make sure the rate-limiting code automatically forgives a user
+            # after some time has passed.
+            with mock.patch('time.time', return_value=(start_time + 1.01)):
+                result = self.send_unauthed_api_request()
+            self.assertNotEqual(result, 429)
+        finally:
+            # We needs this in a finally block to ensure the test cleans up after itself
+            # even in case of failure, to avoid polluting the rules state.
+            remove_ratelimit_rule(1, 5, domain='api_by_ip')
 
     def test_hit_ratelimiterlockingexception(self) -> None:
         user = self.example_user('cordelia')
