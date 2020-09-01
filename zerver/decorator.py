@@ -728,11 +728,8 @@ def rate_limit_user(request: HttpRequest, user: UserProfile, domain: str) -> Non
 
     RateLimitedUser(user, domain=domain).rate_limit_request(request)
 
-def rate_limit(domain: str='api_by_user') -> Callable[[ViewFuncT], ViewFuncT]:
-    """Rate-limits a view. Takes an optional 'domain' param if you wish to
-    rate limit different types of API calls independently.
-
-    Returns a decorator"""
+def rate_limit() -> Callable[[ViewFuncT], ViewFuncT]:
+    """Rate-limits a view. Returns a decorator"""
     def wrapper(func: ViewFuncT) -> ViewFuncT:
         @wraps(func)
         def wrapped_func(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponse:
@@ -757,7 +754,7 @@ def rate_limit(domain: str='api_by_user') -> Callable[[ViewFuncT], ViewFuncT]:
                 return func(request, *args, **kwargs)
 
             assert isinstance(user, UserProfile)
-            rate_limit_user(request, user, domain)
+            rate_limit_user(request, user, domain='api_by_user')
 
             return func(request, *args, **kwargs)
         return cast(ViewFuncT, wrapped_func)  # https://github.com/python/mypy/issues/1927
