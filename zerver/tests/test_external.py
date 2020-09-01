@@ -1,4 +1,5 @@
 import time
+from typing import Any, Callable
 from unittest import mock
 
 import DNS
@@ -104,14 +105,11 @@ class RateLimitTests(ZulipTestCase):
         newlimit = int(result['X-RateLimit-Remaining'])
         self.assertEqual(limit, newlimit + 1)
 
-    def test_hit_ratelimits_as_user(self) -> None:
-        user = self.example_user('cordelia')
-        RateLimitedUser(user).clear_history()
-
+    def do_test_hit_ratelimits(self, request_func: Callable[..., HttpResponse], *request_func_args: Any) -> HttpResponse:
         start_time = time.time()
         for i in range(6):
             with mock.patch('time.time', return_value=(start_time + i * 0.1)):
-                result = self.send_api_message(user, f"some stuff {i}")
+                result = request_func(*request_func_args)
 
         self.assertEqual(result.status_code, 429)
         json = result.json()
@@ -121,40 +119,27 @@ class RateLimitTests(ZulipTestCase):
         self.assertTrue('Retry-After' in result)
         self.assertEqual(result['Retry-After'], '0.5')
 
-        # We actually wait a second here, rather than force-clearing our history,
+        # We simulate waiting a second here, rather than force-clearing our history,
         # to make sure the rate-limiting code automatically forgives a user
         # after some time has passed.
         with mock.patch('time.time', return_value=(start_time + 1.01)):
-            result = self.send_api_message(user, "Good message")
+            result = request_func(*request_func_args)
 
-            self.assert_json_success(result)
+            self.assertNotEqual(result, 429)
+
+    def test_hit_ratelimits_as_user(self) -> None:
+        user = self.example_user('cordelia')
+        RateLimitedUser(user).clear_history()
+
+        self.do_test_hit_ratelimits(self.send_api_message, user, "some stuff")
 
     def test_hit_ratelimits_as_ip(self) -> None:
         add_ratelimit_rule(1, 5, domain='api_by_ip')
         try:
             RateLimitedIPAddr("127.0.0.1").clear_history()
-
-            start_time = time.time()
-            for i in range(6):
-                with mock.patch('time.time', return_value=(start_time + i * 0.1)):
-                    result = self.send_unauthed_api_request()
-
-            self.assertEqual(result.status_code, 429)
-            json = result.json()
-            self.assertEqual(json.get("result"), "error")
-            self.assertIn("API usage exceeded rate limit", json.get("msg"))
-            self.assertEqual(json.get('retry-after'), 0.5)
-            self.assertTrue('Retry-After' in result)
-            self.assertEqual(result['Retry-After'], '0.5')
-
-            # We actually wait a second here, rather than force-clearing our history,
-            # to make sure the rate-limiting code automatically forgives a user
-            # after some time has passed.
-            with mock.patch('time.time', return_value=(start_time + 1.01)):
-                result = self.send_unauthed_api_request()
-            self.assertNotEqual(result, 429)
+            self.do_test_hit_ratelimits(self.send_unauthed_api_request)
         finally:
-            # We needs this in a finally block to ensure the test cleans up after itself
+            # We need this in a finally block to ensure the test cleans up after itself
             # even in case of failure, to avoid polluting the rules state.
             remove_ratelimit_rule(1, 5, domain='api_by_ip')
 
