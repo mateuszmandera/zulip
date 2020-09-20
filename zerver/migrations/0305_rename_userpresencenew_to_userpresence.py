@@ -8,6 +8,10 @@ class Migration(migrations.Migration):
     Finalizes the migration to the new UserPresence model.
     We can get rid of the old table together with its data,
     and replace it with the new one.
+    TODO: Right now, for testing purposes, we back up the old table
+    as zerver_userpresence_old to be able to revert this process and go back
+    to using the old UserPresence system on production servers, without data loss.
+    After testing, this migration should be changed to do a basic DeleteModel.
     """
 
     dependencies = [
@@ -15,9 +19,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.DeleteModel(
-            name='UserPresence',
-        ),
+        # We feign deletion of the old UserPresence model, but behind the scenes we simply rename the table
+        # to make this process reversible without data loss.
+        migrations.RunSQL("ALTER TABLE zerver_userpresence RENAME TO zerver_userpresence_old",
+                          reverse_sql="ALTER TABLE zerver_userpresence_old RENAME TO zerver_userpresence",
+                          state_operations=[migrations.DeleteModel(name='UserPresence'), ]),
         migrations.RenameModel(
             old_name='UserPresenceNew',
             new_name='UserPresence',

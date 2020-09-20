@@ -45,6 +45,10 @@ def fill_new_columns(apps: StateApps, schema_editor: DatabaseSchemaEditor) -> No
          for user_id, presence_info in user_id_to_presence_info.items()]
     )
 
+def delete_new_columns(apps: StateApps, schema_editor: DatabaseSchemaEditor) -> None:
+    UserPresenceNew = apps.get_model('zerver', 'UserPresenceNew')
+    UserPresenceNew.objects.all().delete()
+
 class Migration(migrations.Migration):
     """
     Ports data from the UserPresence model into the new one.
@@ -55,5 +59,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(fill_new_columns)
+        migrations.RunPython(fill_new_columns, reverse_code=delete_new_columns)
     ]
