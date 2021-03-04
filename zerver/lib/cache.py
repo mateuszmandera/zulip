@@ -581,11 +581,12 @@ def delete_user_profile_caches(user_profiles: Iterable["UserProfile"]) -> None:
 
     keys = []
     for user_profile in user_profiles:
-        keys.append(user_profile_by_email_cache_key(user_profile.delivery_email))
         keys.append(user_profile_by_id_cache_key(user_profile.id))
         for api_key in get_all_api_keys(user_profile):
             keys.append(user_profile_by_api_key_cache_key(api_key))
         keys.append(user_profile_cache_key(user_profile.email, user_profile.realm))
+        if user_profile.email != user_profile.delivery_email:
+            keys.append(user_profile_cache_key(user_profile.delivery_email, user_profile.realm))
         if user_profile.is_bot and is_cross_realm_bot_email(user_profile.email):
             # Handle clearing system bots from their special cache.
             keys.append(bot_profile_cache_key(user_profile.email))
