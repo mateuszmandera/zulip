@@ -5,7 +5,6 @@ from django.db.models import Count
 from django.utils.translation import ugettext as _
 
 from zerver.lib.actions import (
-    create_users,
     do_add_reaction,
     do_send_messages,
     internal_prep_stream_message_by_name,
@@ -13,6 +12,7 @@ from zerver.lib.actions import (
 )
 from zerver.lib.emoji import emoji_name_to_emoji_code
 from zerver.lib.message import SendMessageRequest
+from zerver.lib.server_initialization import setup_realm_internal_bots
 from zerver.models import Message, Realm, UserProfile, get_system_bot
 
 
@@ -26,27 +26,6 @@ def missing_any_realm_internal_bots() -> bool:
     )
     realm_count = Realm.objects.count()
     return any(bot_counts.get(email, 0) < realm_count for email in bot_emails)
-
-
-def setup_realm_internal_bots(realm: Realm) -> None:
-    """Create this realm's internal bots.
-
-    This function is idempotent; it does nothing for a bot that
-    already exists.
-    """
-    internal_bots = [
-        (bot["name"], bot["email_template"] % (settings.INTERNAL_BOT_DOMAIN,))
-        for bot in settings.REALM_INTERNAL_BOTS
-    ]
-    create_users(realm, internal_bots, bot_type=UserProfile.DEFAULT_BOT)
-    bots = UserProfile.objects.filter(
-        realm=realm,
-        email__in=[bot_info[1] for bot_info in internal_bots],
-        bot_owner__isnull=True,
-    )
-    for bot in bots:
-        bot.bot_owner = bot
-        bot.save()
 
 
 def create_if_missing_realm_internal_bots() -> None:
@@ -96,11 +75,13 @@ def send_initial_pms(user: UserProfile) -> None:
         apps_url="/apps", settings_url="#settings", organization_setup_text=organization_setup_text
     )
 
-    internal_send_private_message(get_system_bot(settings.WELCOME_BOT), user, content)
+    internal_send_private_message(
+        get_system_bot(settings.WELCOME_BOT, user.realm_id), user, content
+    )
 
 
 def send_welcome_bot_response(send_request: SendMessageRequest) -> None:
-    welcome_bot = get_system_bot(settings.WELCOME_BOT)
+    welcome_bot = get_system_bot(settings.WELCOME_BOT, send_request.message.sender.realm_id)
     human_recipient_id = send_request.message.sender.recipient_id
     if Message.objects.filter(sender=welcome_bot, recipient_id=human_recipient_id).count() < 2:
         content = (
@@ -117,7 +98,7 @@ def send_welcome_bot_response(send_request: SendMessageRequest) -> None:
 
 
 def send_initial_realm_messages(realm: Realm) -> None:
-    welcome_bot = get_system_bot(settings.WELCOME_BOT)
+    welcome_bot = get_system_bot(settings.WELCOME_BOT, realm.id)
     # Make sure each stream created in the realm creation process has at least one message below
     # Order corresponds to the ordering of the streams on the left sidebar, to make the initial Home
     # view slightly less overwhelming

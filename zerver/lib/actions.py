@@ -119,7 +119,11 @@ from zerver.lib.send_email import (
     send_email,
     send_email_to_admins,
 )
-from zerver.lib.server_initialization import create_internal_realm, server_initialized
+from zerver.lib.server_initialization import (
+    create_internal_realm,
+    server_initialized,
+    setup_realm_internal_bots,
+)
 from zerver.lib.sessions import delete_user_sessions
 from zerver.lib.storage import static_path
 from zerver.lib.stream_subscription import (
@@ -4396,6 +4400,8 @@ def do_create_realm(
         kwargs["emails_restricted_to_domains"] = emails_restricted_to_domains
     realm = Realm(string_id=string_id, name=name, **kwargs)
     realm.save()
+
+    setup_realm_internal_bots(realm)
 
     # Create stream once Realm object has been saved
     notifications_stream = ensure_stream(

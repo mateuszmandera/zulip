@@ -273,7 +273,11 @@ python_rules = RuleList(
                     "user_profile.save()  # Can't use update_fields because of how the foreign key works.",
                 ),
             },
-            "exclude": {"zerver/tests", "zerver/lib/create_user.py"},
+            "exclude": {
+                "zerver/tests",
+                "zerver/lib/create_user.py",
+                "zerver/migrations/0311_put_system_bots_in_all_realms.py",
+            },
             "good_lines": ['user_profile.save(update_fields=["pointer"])'],
             "bad_lines": ["user_profile.save()"],
         },

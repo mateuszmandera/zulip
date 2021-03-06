@@ -495,8 +495,8 @@ def user_profile_cache_key(email: str, realm: "Realm") -> str:
     return user_profile_cache_key_id(email, realm.id)
 
 
-def bot_profile_cache_key(email: str) -> str:
-    return f"bot_profile:{make_safe_digest(email.strip())}"
+def bot_profile_cache_key(email: str, realm_id: int) -> str:
+    return f"bot_profile:{make_safe_digest(email.strip())}:{realm_id}"
 
 
 def user_profile_by_id_cache_key(user_profile_id: int) -> str:
@@ -582,7 +582,7 @@ def delete_user_profile_caches(user_profiles: Iterable["UserProfile"]) -> None:
             keys.append(user_profile_cache_key(user_profile.delivery_email, user_profile.realm))
         if user_profile.is_bot and is_cross_realm_bot_email(user_profile.email):
             # Handle clearing system bots from their special cache.
-            keys.append(bot_profile_cache_key(user_profile.email))
+            keys.append(bot_profile_cache_key(user_profile.email, user_profile.realm_id))
 
     cache_delete_many(keys)
 

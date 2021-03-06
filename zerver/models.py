@@ -2691,32 +2691,26 @@ def get_active_user_profile_by_id_in_realm(uid: int, realm: Realm) -> UserProfil
     return user_profile
 
 
-def get_user_including_cross_realm(email: str, realm: Optional[Realm] = None) -> UserProfile:
-    if is_cross_realm_bot_email(email):
-        return get_system_bot(email)
+def get_user_including_cross_realm(email: str, realm: Realm) -> UserProfile:
     assert realm is not None
+    if is_cross_realm_bot_email(email):
+        return get_system_bot(email, realm.id)
     return get_user(email, realm)
 
 
 @cache_with_key(bot_profile_cache_key, timeout=3600 * 24 * 7)
-def get_system_bot(email: str) -> UserProfile:
-    return UserProfile.objects.select_related().get(email__iexact=email.strip())
+def get_system_bot(email: str, realm_id: int) -> UserProfile:
+    return UserProfile.objects.select_related().get(
+        email__iexact=email.strip(), realm_id=realm_id, is_bot=True
+    )
 
 
 def get_user_by_id_in_realm_including_cross_realm(
     uid: int,
-    realm: Optional[Realm],
+    realm: Realm,
 ) -> UserProfile:
     user_profile = get_user_profile_by_id(uid)
-    if user_profile.realm == realm:
-        return user_profile
-
-    # Note: This doesn't validate whether the `realm` passed in is
-    # None/invalid for the CROSS_REALM_BOT_EMAILS case.
-    if user_profile.delivery_email in settings.CROSS_REALM_BOT_EMAILS:
-        return user_profile
-
-    raise UserProfile.DoesNotExist()
+    return user_profile
 
 
 @cache_with_key(realm_user_dicts_cache_key, timeout=3600 * 24 * 7)
