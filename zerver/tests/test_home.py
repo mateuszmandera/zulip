@@ -611,7 +611,7 @@ class HomeTest(ZulipTestCase):
                         is_bot=True,
                         is_admin=False,
                         is_owner=False,
-                        is_cross_realm_bot=True,
+                        is_system_bot=True,
                         is_guest=False,
                     ),
                     dict(
@@ -625,7 +625,7 @@ class HomeTest(ZulipTestCase):
                         is_bot=True,
                         is_admin=False,
                         is_owner=False,
-                        is_cross_realm_bot=True,
+                        is_system_bot=True,
                         is_guest=False,
                     ),
                     dict(
@@ -639,7 +639,7 @@ class HomeTest(ZulipTestCase):
                         is_bot=True,
                         is_admin=False,
                         is_owner=False,
-                        is_cross_realm_bot=True,
+                        is_system_bot=True,
                         is_guest=False,
                     ),
                 ],
