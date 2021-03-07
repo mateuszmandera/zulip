@@ -62,6 +62,7 @@ EXTERNAL_URI_SCHEME = "http://"
 EMAIL_GATEWAY_PATTERN = "%s@" + EXTERNAL_HOST_WITHOUT_PORT
 NOTIFICATION_BOT = "notification-bot@zulip.com"
 ERROR_BOT = "error-bot@zulip.com"
+ERROR_BOT_SUBDOMAIN = "zulip"
 EMAIL_GATEWAY_BOT = "emailgateway@zulip.com"
 PHYSICAL_ADDRESS = "Zulip Headquarters, 123 Octo Stream, South Pacific Ocean"
 STAFF_SUBDOMAIN = "zulip"
