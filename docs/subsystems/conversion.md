@@ -219,32 +219,6 @@ Recommendation: We probably want to get a backup of all this data that
 is very simply bulk-exported from the entire DB, and we should
 obviously put it in a secure place.
 
-#### Cross realm data
-- models: `Client`
-- assets: `realm.json`, three bots (`notification`/`email`/`welcome`),
-  `id_maps`
-
-The good news here is that `Client` is a small table, and there are
-only three special bots.
-
-The bad news is that cross-realm data **complicates everything else**,
-and we have to avoid **database ID conflicts**.
-
-If we use bottom-up approaches to load small user populations at a
-time, we may have **merging** issues here.  We will need to
-consolidate IDs either by merging exports in `/tmp` or handle it at
-import time.
-
-For the three bots, they live in `zerver_userprofile_crossrealm`, and
-we re-map their IDs on the new server.
-
-Recommendation: Do not sweat the exports too much.  Deal with all the
-messiness at import time, and rely on the tables being really small.
-We already have logic to catch `Client.DoesNotExist` exceptions, for
-example.  As for possibly missing messages that the welcome bot and
-friends have sent in the past, I am not sure what our risk profile is
-there, but I imagine it is relatively low.
-
 #### Disjoint user data
 - models: `UserProfile/UserActivity/UserActivityInterval/UserPresence`
 - assets: `realm.json`, `password`, `api_key`, `avatar salt`,

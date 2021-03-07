@@ -464,7 +464,7 @@ class ImportExportTest(ZulipTestCase):
         realm_emoji.save()
 
         data = full_data["realm"]
-        self.assertEqual(len(data["zerver_userprofile_crossrealm"]), 3)
+        self.assertNotIn("zerver_userprofile_crossrealm", data)
         self.assertEqual(len(data["zerver_userprofile_mirrordummy"]), 0)
 
         exported_user_emails = self.get_set(data["zerver_userprofile"], "delivery_email")
@@ -624,7 +624,7 @@ class ImportExportTest(ZulipTestCase):
 
         data = full_data["realm"]
 
-        self.assertEqual(len(data["zerver_userprofile_crossrealm"]), 3)
+        self.assertNotIn("zerver_userprofile_crossrealm", data)
         self.assertEqual(len(data["zerver_userprofile_mirrordummy"]), 0)
 
         exported_user_emails = self.get_set(data["zerver_userprofile"], "delivery_email")
