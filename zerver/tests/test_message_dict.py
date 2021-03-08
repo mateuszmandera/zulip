@@ -270,11 +270,11 @@ class MessageDictTest(ZulipTestCase):
         # Send messages before and after saving the realm filter from each user.
         assert_topic_links([], get_message(self.example_user("othello")))
         assert_topic_links([], get_message(self.lear_user("cordelia")))
-        assert_topic_links([], get_message(self.notification_bot()))
+        assert_topic_links([], get_message(self.notification_bot(zulip_realm)))
         realm_filter.save()
         assert_topic_links([url], get_message(self.example_user("othello")))
         assert_topic_links([url], get_message(self.lear_user("cordelia")))
-        assert_topic_links([url], get_message(self.notification_bot()))
+        assert_topic_links([url], get_message(self.notification_bot(zulip_realm)))
 
     def test_reaction(self) -> None:
         sender = self.example_user("othello")
