@@ -759,7 +759,7 @@ def approve_sponsorship(realm: Realm) -> None:
     if customer is not None and customer.sponsorship_pending:
         customer.sponsorship_pending = False
         customer.save(update_fields=["sponsorship_pending"])
-    notification_bot = get_system_bot(settings.NOTIFICATION_BOT)
+    notification_bot = get_system_bot(settings.NOTIFICATION_BOT, realm.id)
     for billing_admin in realm.get_human_billing_admin_users():
         with override_language(billing_admin.default_language):
             # Using variable to make life easier for translators if these details change.
