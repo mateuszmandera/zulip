@@ -4,7 +4,6 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, TypeVar, Union
 from unittest import mock
 
 import orjson
-from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.test import override_settings
@@ -61,10 +60,8 @@ from zerver.models import (
     get_realm,
     get_source_profile,
     get_stream,
-    get_system_bot,
     get_user,
     get_user_by_delivery_email,
-    get_user_by_id_in_realm_including_cross_realm,
 )
 
 K = TypeVar("K")
@@ -811,7 +808,7 @@ class QueryCountTest(ZulipTestCase):
                         acting_user=None,
                     )
 
-        self.assert_length(queries, 68)
+        self.assert_length(queries, 69)
         self.assert_length(cache_tries, 20)
         self.assert_length(events, 7)
 

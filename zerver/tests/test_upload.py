@@ -586,8 +586,10 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         fp_path_id = re.sub("/user_uploads/", "", uri)
         body = f"First message ...[zulip.txt](http://{host}/user_uploads/" + fp_path_id + ")"
         with self.settings(CROSS_REALM_BOT_EMAILS={user_2.email, user_3.email}):
+            user_2.is_bot = True
+            user_2.save(update_fields=["is_bot"])
             internal_send_private_message(
-                sender=get_system_bot(user_2.email),
+                sender=get_system_bot(user_2.email, user_2.realm_id),
                 recipient_user=user_1,
                 content=body,
             )
@@ -1010,7 +1012,8 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
         cordelia.email = cordelia.delivery_email
         cordelia.save()
 
-        cross_realm_bot = get_system_bot(settings.WELCOME_BOT)
+        internal_realm = get_realm(settings.SYSTEM_BOT_REALM)
+        cross_realm_bot = get_system_bot(settings.WELCOME_BOT, internal_realm.id)
 
         cordelia.avatar_source = UserProfile.AVATAR_FROM_USER
         cordelia.save()

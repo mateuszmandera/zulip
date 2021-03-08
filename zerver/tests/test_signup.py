@@ -745,7 +745,7 @@ class LoginTest(ZulipTestCase):
         with queries_captured() as queries, cache_tries_captured() as cache_tries:
             self.register(self.nonreg_email("test"), "test")
         # Ensure the number of queries we make is not O(streams)
-        self.assertEqual(len(queries), 70)
+        self.assertEqual(len(queries), 71)
 
         # We can probably avoid a couple cache hits here, but there doesn't
         # seem to be any O(N) behavior.  Some of the cache hits are related
@@ -2585,7 +2585,8 @@ class EmailUnsubscribeTests(ZulipTestCase):
 class RealmCreationTest(ZulipTestCase):
     @override_settings(OPEN_REALM_CREATION=True)
     def check_able_to_create_realm(self, email: str, password: str = "test") -> None:
-        notification_bot = get_system_bot(settings.NOTIFICATION_BOT)
+        internal_realm = get_realm(settings.SYSTEM_BOT_REALM)
+        notification_bot = get_system_bot(settings.NOTIFICATION_BOT, internal_realm.id)
         signups_stream, _ = create_stream_if_needed(notification_bot.realm, "signups")
 
         string_id = "zuliptest"

@@ -82,6 +82,7 @@ from zerver.models import (
     get_client,
     get_default_stream_groups,
     get_realm,
+    get_system_bot,
     get_user,
     get_user_profile_by_id_in_realm,
 )
@@ -278,7 +279,7 @@ class TestCreateStreams(ZulipTestCase):
         self.subscribe(iago, announce_stream.name)
         self.subscribe(hamlet, announce_stream.name)
 
-        notification_bot = UserProfile.objects.get(full_name="Notification Bot")
+        notification_bot = get_system_bot(settings.NOTIFICATION_BOT, realm.id)
         self.login_user(iago)
 
         initial_message_count = Message.objects.count()
@@ -873,7 +874,7 @@ class StreamAdminTest(ZulipTestCase):
         self.assertEqual(message.recipient.type, Recipient.STREAM)
         self.assertEqual(message.content, message_content)
         self.assertEqual(message.sender.email, "notification-bot@zulip.com")
-        self.assertEqual(message.sender.realm, get_realm(settings.SYSTEM_BOT_REALM))
+        self.assertEqual(message.sender.realm, stream.realm)
 
     def test_realm_admin_can_update_unsub_private_stream(self) -> None:
         iago = self.example_user("iago")
@@ -3400,7 +3401,7 @@ class SubscriptionAPITest(ZulipTestCase):
         )
 
         self.assertNotIn(self.example_user("polonius").id, add_peer_event["users"])
-        self.assertEqual(len(add_peer_event["users"]), 12)
+        self.assertEqual(len(add_peer_event["users"]), 15)
         self.assertEqual(add_peer_event["event"]["type"], "subscription")
         self.assertEqual(add_peer_event["event"]["op"], "peer_add")
         self.assertEqual(add_peer_event["event"]["user_ids"], [self.user_profile.id])
@@ -3432,7 +3433,7 @@ class SubscriptionAPITest(ZulipTestCase):
         # We don't send a peer_add event to othello
         self.assertNotIn(user_profile.id, add_peer_event["users"])
         self.assertNotIn(self.example_user("polonius").id, add_peer_event["users"])
-        self.assertEqual(len(add_peer_event["users"]), 12)
+        self.assertEqual(len(add_peer_event["users"]), 15)
         self.assertEqual(add_peer_event["event"]["type"], "subscription")
         self.assertEqual(add_peer_event["event"]["op"], "peer_add")
         self.assertEqual(add_peer_event["event"]["user_ids"], [user_profile.id])

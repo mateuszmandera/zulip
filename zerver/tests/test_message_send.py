@@ -219,8 +219,7 @@ class MessagePOSTTest(ZulipTestCase):
             "Only organization administrators can send to this stream.",
         )
 
-        # Cross realm bots should be allowed
-        notification_bot = get_system_bot("notification-bot@zulip.com")
+        notification_bot = get_system_bot("notification-bot@zulip.com", stream.realm_id)
         internal_send_stream_message(
             notification_bot, stream, "Test topic", "Test message by notification bot"
         )
@@ -305,8 +304,7 @@ class MessagePOSTTest(ZulipTestCase):
             bot_without_owner, stream_name, "New members cannot send to this stream."
         )
 
-        # Cross realm bots should be allowed
-        notification_bot = get_system_bot("notification-bot@zulip.com")
+        notification_bot = get_system_bot("notification-bot@zulip.com", stream.realm_id)
         internal_send_stream_message(
             notification_bot, stream, "Test topic", "Test message by notification bot"
         )
@@ -1849,7 +1847,8 @@ class PersonalMessageSendTest(ZulipTestCase):
             self.send_personal_message(user_profile, self.example_user("cordelia"))
 
         bot_profile = self.create_test_bot("testbot", user_profile)
-        self.send_personal_message(user_profile, get_system_bot(settings.NOTIFICATION_BOT))
+        notification_bot = get_system_bot("notification-bot@zulip.com", user_profile.realm_id)
+        self.send_personal_message(user_profile, notification_bot)
         self.send_personal_message(user_profile, bot_profile)
         self.send_personal_message(bot_profile, user_profile)
 
@@ -2120,8 +2119,10 @@ class TestCrossRealmPMs(ZulipTestCase):
             messages = get_user_messages(to_user)
             self.assertEqual(messages[-1].sender.id, from_user.id)
 
-        def assert_invalid_user() -> Any:
-            return self.assertRaisesRegex(JsonableError, "Invalid user ID ")
+        def assert_cant_send_outside_realm() -> Any:
+            return self.assertRaisesRegex(
+                JsonableError, "You can't send private messages outside of your organization."
+            )
 
         user1_email = "user1@1.example.com"
         user1a_email = "user1a@1.example.com"
@@ -2134,7 +2135,9 @@ class TestCrossRealmPMs(ZulipTestCase):
         user1a = self.create_user(user1a_email)
         user2 = self.create_user(user2_email)
         user3 = self.create_user(user3_email)
-        notification_bot = get_system_bot(notification_bot_email)
+
+        internal_realm = get_realm(settings.SYSTEM_BOT_REALM)
+        notification_bot = get_system_bot(notification_bot_email, internal_realm.id)
         with self.settings(
             CROSS_REALM_BOT_EMAILS=["notification-bot@zulip.com", "welcome-bot@zulip.com"]
         ):
@@ -2154,7 +2157,7 @@ class TestCrossRealmPMs(ZulipTestCase):
         # Cross-realm bots in the zulip.com realm can PM any realm
         # (They need lower level APIs to do this.)
         internal_send_private_message(
-            sender=get_system_bot(notification_bot_email),
+            sender=notification_bot,
             recipient_user=get_user(user2_email, r2),
             content="bla",
         )
@@ -2167,7 +2170,7 @@ class TestCrossRealmPMs(ZulipTestCase):
         # be used.
         internal_send_private_message(
             sender=user2,
-            recipient_user=get_system_bot(notification_bot_email),
+            recipient_user=notification_bot,
             content="blabla",
         )
         assert_message_received(notification_bot, user2)
@@ -2188,27 +2191,27 @@ class TestCrossRealmPMs(ZulipTestCase):
 
         # Prevent old loophole where I could send PMs to other users as long
         # as I copied a cross-realm bot from the same realm.
-        with assert_invalid_user():
+        with assert_cant_send_outside_realm():
             self.send_huddle_message(user1, [user3, support_bot])
 
         # Users on three different realms can't PM each other,
         # even if one of the users is a cross-realm bot.
-        with assert_invalid_user():
+        with assert_cant_send_outside_realm():
             self.send_huddle_message(user1, [user2, notification_bot])
 
-        with assert_invalid_user():
+        with assert_cant_send_outside_realm():
             self.send_huddle_message(notification_bot, [user1, user2])
 
         # Users on the different realms cannot PM each other
-        with assert_invalid_user():
+        with assert_cant_send_outside_realm():
             self.send_personal_message(user1, user2)
 
         # Users on non-zulip realms can't PM "ordinary" Zulip users
-        with assert_invalid_user():
+        with assert_cant_send_outside_realm():
             self.send_personal_message(user1, self.example_user("hamlet"))
 
         # Users on three different realms cannot PM each other
-        with assert_invalid_user():
+        with assert_cant_send_outside_realm():
             self.send_huddle_message(user1, [user2, user3])
 
 
