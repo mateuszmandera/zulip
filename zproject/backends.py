@@ -742,19 +742,13 @@ class ZulipLDAPAuthBackendBase(ZulipAuthMixin, LDAPBackend):
             var_name = "_".join(field.name.lower().split(" "))
             fields_by_var_name[var_name] = field
 
-        existing_values = {}
-        for data in user_profile.profile_data:
-            var_name = "_".join(data["name"].lower().split(" "))
-            existing_values[var_name] = data["value"]
-
         profile_data: List[Dict[str, Union[int, str, List[int]]]] = []
         for var_name, value in values_by_var_name.items():
             try:
                 field = fields_by_var_name[var_name]
             except KeyError:
                 raise ZulipLDAPException(f"Custom profile field with name {var_name} not found.")
-            if existing_values.get(var_name) == value:
-                continue
+
             try:
                 validate_user_custom_profile_field(user_profile.realm.id, field, value)
             except ValidationError as error:
