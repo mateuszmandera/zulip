@@ -1848,7 +1848,9 @@ so we didn't send them an invitation. We did send invitations to everyone else!"
         invitee = PreregistrationUser.objects.get(email=data["email"])
         referrer = self.example_user(referrer_name)
         validity_in_days = 2
-        link = create_confirmation_link(invitee, Confirmation.INVITATION, validity_in_days)
+        link = create_confirmation_link(
+            invitee, Confirmation.INVITATION, validity_in_days=validity_in_days
+        )
         context = common_context(referrer)
         context.update(
             activate_url=link,
@@ -2198,7 +2200,9 @@ class InvitationsTestCase(InviteUserBase):
             email="TestThree@zulip.com", referred_by=user_profile, status=active_value
         )
         prereg_user_three.save()
-        create_confirmation_link(prereg_user_three, Confirmation.INVITATION, invite_expires_in_days)
+        create_confirmation_link(
+            prereg_user_three, Confirmation.INVITATION, validity_in_days=invite_expires_in_days
+        )
 
         do_create_multiuse_invite_link(
             hamlet, PreregistrationUser.INVITE_AS["MEMBER"], invite_expires_in_days
@@ -2317,7 +2321,9 @@ class InvitationsTestCase(InviteUserBase):
             referred_by=self.example_user("hamlet"), realm=zulip_realm
         )
         validity_in_days = 2
-        create_confirmation_link(multiuse_invite, Confirmation.MULTIUSE_INVITE, validity_in_days)
+        create_confirmation_link(
+            multiuse_invite, Confirmation.MULTIUSE_INVITE, validity_in_days=validity_in_days
+        )
         result = self.client_delete("/json/invites/multiuse/" + str(multiuse_invite.id))
         self.assertEqual(result.status_code, 200)
         self.assertIsNone(MultiuseInvite.objects.filter(id=multiuse_invite.id).first())
@@ -2332,7 +2338,9 @@ class InvitationsTestCase(InviteUserBase):
             invited_as=PreregistrationUser.INVITE_AS["REALM_OWNER"],
         )
         validity_in_days = 2
-        create_confirmation_link(multiuse_invite, Confirmation.MULTIUSE_INVITE, validity_in_days)
+        create_confirmation_link(
+            multiuse_invite, Confirmation.MULTIUSE_INVITE, validity_in_days=validity_in_days
+        )
         error_result = self.client_delete("/json/invites/multiuse/" + str(multiuse_invite.id))
         self.assert_json_error(error_result, "Must be an organization owner")
 
@@ -2348,7 +2356,7 @@ class InvitationsTestCase(InviteUserBase):
         )
         validity_in_days = 2
         create_confirmation_link(
-            multiuse_invite_in_mit, Confirmation.MULTIUSE_INVITE, validity_in_days
+            multiuse_invite_in_mit, Confirmation.MULTIUSE_INVITE, validity_in_days=validity_in_days
         )
         error_result = self.client_delete(
             "/json/invites/multiuse/" + str(multiuse_invite_in_mit.id)
@@ -2590,7 +2598,9 @@ class MultiuseInviteTest(ZulipTestCase):
             date_sent = timezone_now()
         validity_in_days = 2
         with patch("confirmation.models.timezone_now", return_value=date_sent):
-            return create_confirmation_link(invite, Confirmation.MULTIUSE_INVITE, validity_in_days)
+            return create_confirmation_link(
+                invite, Confirmation.MULTIUSE_INVITE, validity_in_days=validity_in_days
+            )
 
     def check_user_able_to_register(self, email: str, invite_link: str) -> None:
         password = "password"
