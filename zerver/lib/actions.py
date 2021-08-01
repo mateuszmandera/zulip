@@ -6902,6 +6902,7 @@ def do_invite_users(
     user_profile: UserProfile,
     invitee_emails: Collection[str],
     streams: Collection[Stream],
+    *,
     invite_expires_in_days: int,
     invite_as: int = PreregistrationUser.INVITE_AS["MEMBER"],
 ) -> None:
