@@ -740,6 +740,12 @@ urls += [
 urls += [path("", include("social_django.urls", namespace="social"))]
 urls += [path("saml/metadata.xml", saml_sp_metadata)]
 
+# SCIM2
+
+urls += [
+    path("scim/v2/", include("django_scim.urls", namespace="scim")),
+]
+
 # User documentation site
 help_documentation_view = MarkdownDirectoryView.as_view(
     template_name="zerver/documentation_main.html", path_template="/zerver/help/%s.md"

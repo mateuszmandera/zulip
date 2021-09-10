@@ -271,3 +271,5 @@ RATE_LIMITING_RULES: Dict[str, List[Tuple[int, int]]] = {
 }
 
 FREE_TRIAL_DAYS: Optional[int] = None
+
+SCIM_BEARER_TOKENS = {"zulip": ("token1234", "scim-bot@zulip.com")}

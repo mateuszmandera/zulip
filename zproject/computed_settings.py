@@ -187,6 +187,7 @@ MIDDLEWARE = (
     "zerver.middleware.HostDomainMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "zerver.middleware.ZulipSCIMAuthCheckMiddleware",
     # Make sure 2FA middlewares come after authentication middleware.
     "django_otp.middleware.OTPMiddleware",  # Required by two factor auth.
     "two_factor.middleware.threadlocals.ThreadLocals",  # Required by Twilio
@@ -213,6 +214,7 @@ INSTALLED_APPS = [
     "confirmation",
     "zerver",
     "social_django",
+    "django_scim",
     # 2FA related apps.
     "django_otp",
     "django_otp.plugins.otp_static",
@@ -1194,3 +1196,19 @@ if SENTRY_DSN:
     from .sentry import setup_sentry
 
     setup_sentry(SENTRY_DSN, get_config("machine", "deploy_type", "development"))
+
+SCIM_SERVICE_PROVIDER = {
+    "USER_ADAPTER": "zerver.lib.scim.ZulipSCIMUser",
+    "USER_FILTER_PARSER": "zerver.lib.scim_filter.ZulipUserFilterQuery",
+    "NETLOC": EXTERNAL_HOST,
+    "SCHEME": EXTERNAL_URI_SCHEME,
+    "GET_EXTRA_MODEL_FILTER_KWARGS_GETTER": "zerver.lib.scim.get_extra_model_filter_kwargs_getter",
+    "BASE_LOCATION_GETTER": "zerver.lib.scim.base_scim_location_getter",
+    "AUTHENTICATION_SCHEMES": [
+        {
+            "type": "bearer",
+            "name": "Bearer",
+            "description": "Bearer token",
+        },
+    ],
+}

@@ -179,3 +179,5 @@ SOCIAL_AUTH_SAML_SP_ENTITY_ID = "http://localhost:9991"
 SOCIAL_AUTH_SUBDOMAIN = "auth"
 
 MEMCACHED_USERNAME: Optional[str] = None
+
+SCIM_BEARER_TOKENS = {"zulip": ("token1234", "scim-bot@zulip.com")}

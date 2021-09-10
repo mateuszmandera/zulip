@@ -28,6 +28,8 @@ from django.utils.cache import patch_vary_headers
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.translation import gettext as _
 from django.views.csrf import csrf_failure as html_csrf_failure
+from django_scim.middleware import SCIMAuthCheckMiddleware
+from django_scim.settings import scim_settings
 from sentry_sdk import capture_exception
 from sentry_sdk.integrations.logging import ignore_logger
 
@@ -44,7 +46,13 @@ from zerver.lib.subdomains import get_subdomain
 from zerver.lib.types import ViewFuncT
 from zerver.lib.user_agent import parse_user_agent
 from zerver.lib.utils import statsd
-from zerver.models import Realm, flush_per_request_caches, get_realm
+from zerver.models import (
+    Realm,
+    UserProfile,
+    flush_per_request_caches,
+    get_realm,
+    get_user_by_delivery_email,
+)
 
 logger = logging.getLogger("zulip.requests")
 slow_query_logger = logging.getLogger("zulip.slow_queries")
@@ -664,3 +672,36 @@ class ZulipCommonMiddleware(CommonMiddleware):
         if settings.RUNNING_INSIDE_TORNADO:
             return False
         return super().should_redirect_with_slash(request)
+
+
+def validate_scim_bearer_token(request: HttpRequest) -> Optional[UserProfile]:
+    subdomain = get_subdomain(request)
+    valid_bearer_token, scim_bot_email = settings.SCIM_BEARER_TOKENS[subdomain]
+    # We really don't want a misconfiguration where this is unset,
+    # allowing free access to the SCIM API:
+    assert valid_bearer_token
+
+    if request.headers.get("Authorization") != f"Bearer {valid_bearer_token}":
+        return None
+
+    request_notes = RequestNotes.get_notes(request)
+    assert request_notes.realm
+    return get_user_by_delivery_email(scim_bot_email, request_notes.realm)
+
+
+class ZulipSCIMAuthCheckMiddleware(SCIMAuthCheckMiddleware):
+    def process_request(self, request: HttpRequest) -> Optional[HttpResponse]:
+        if self.should_log_request(request):
+            self.log_request(request)
+
+        if not request.path.startswith(self.reverse_url):
+            return None
+
+        scim_bot = validate_scim_bearer_token(request)
+        if not scim_bot:
+            response = HttpResponse(status=401)
+            response["WWW-Authenticate"] = scim_settings.WWW_AUTHENTICATE_HEADER
+            return response
+
+        request.user = scim_bot
+        return None
