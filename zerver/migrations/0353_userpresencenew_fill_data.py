@@ -63,6 +63,8 @@ class Migration(migrations.Migration):
     Ports data from the UserPresence model into the new one.
     """
 
+    atomic = False
+
     dependencies = [
         ("zerver", "0352_userpresencenew"),
     ]
