@@ -7,66 +7,49 @@ PRESENCE_IDLE_STATUS = 2
 
 
 def fill_new_columns(apps: StateApps, schema_editor: DatabaseSchemaEditor) -> None:
-    UserProfile = apps.get_model("zerver", "UserProfile")
     UserPresence = apps.get_model("zerver", "UserPresence")
     UserPresenceNew = apps.get_model("zerver", "UserPresenceNew")
-    latest_active_presence_per_user = list(
-        UserPresence.objects.filter(status=PRESENCE_ACTIVE_STATUS)
-        .order_by("user_profile", "-timestamp")
-        .distinct("user_profile")
-    )
-    latest_idle_presence_per_user = list(
-        UserPresence.objects.filter(status=PRESENCE_IDLE_STATUS)
-        .order_by("user_profile", "-timestamp")
-        .distinct("user_profile")
-    )
 
-    user_profile_id_list = [
-        presence.user_profile_id
-        for presence in latest_active_presence_per_user + latest_idle_presence_per_user
-    ]
-    user_id_to_realm_id = {
-        user["id"]: user["realm_id"]
-        for user in UserProfile.objects.filter(id__in=user_profile_id_list).values("id", "realm_id")
-    }
-
-    user_id_to_presence_info = {}
-    for active_presence in latest_active_presence_per_user:
-        # The simple case is where our last old-style presence input
-        # had the user active: last_active_time and
-        # last_connected_time can both have that value.
-        user_id_to_presence_info[active_presence.user_profile_id] = dict(
-            last_active_time=active_presence.timestamp,
-            last_connected_time=active_presence.timestamp,
+    # In theory, we'd like to preserve the distinction between the
+    # IDLE and ACTIVE statuses in legacy data.  However, there is no
+    # correct way to do so; the previous data structure only stored
+    # the current IDLE/ACTIVE status of the last update for each
+    # (user, client) pair. There's no way to know whether the last
+    # time the user had the other status with that client was minutes
+    # or months beforehand.
+    #
+    # So the only sane thing we can do with this migration is to treat
+    # the last presence update as having been a PRESENCE_ACTIVE_STATUS
+    # event. This will result in some currently-idle users being
+    # incorrectly recorded as having been active at the last moment
+    # that they were idle before this migration.  This error is
+    # unlikely to be significant in practice, and in any case is an
+    # unavoidable flaw caused by the legacy previous data model.
+    latest_presence_per_user = (
+        UserPresence.objects.filter(
+            status__in=[
+                PRESENCE_IDLE_STATUS,
+                PRESENCE_ACTIVE_STATUS,
+            ]
         )
-
-    for idle_presence in latest_idle_presence_per_user:
-        # We cannot faithfully convert the data for users whose last
-        # data is "idle".
-
-        user_id = idle_presence.user_profile_id
-        if user_id not in user_id_to_presence_info:
-            user_id_to_presence_info[user_id] = dict(
-                last_active_time=idle_presence.timestamp,
-                last_connected_time=idle_presence.timestamp,
-            )
-        else:
-            # If one client has an IDLE
-            last_connected_time = max(
-                user_id_to_presence_info[user_id]["last_connected_time"], idle_presence.timestamp
-            )
-            user_id_to_presence_info[user_id]["last_connected_time"] = last_connected_time
+        .order_by("user_profile", "-timestamp")
+        .distinct("user_profile")
+        .values("user_profile_id", "timestamp", "user_profile__realm_id")
+    )
 
     UserPresenceNew.objects.bulk_create(
         [
             UserPresenceNew(
-                user_profile_id=user_id,
-                realm_id=user_id_to_realm_id[user_id],
-                last_connected_time=presence_info["last_connected_time"],
-                last_active_time=presence_info["last_active_time"],
+                user_profile_id=presence_row["user_profile_id"],
+                realm_id=presence_row["user_profile__realm_id"],
+                last_connected_time=presence_row["timestamp"],
+                last_active_time=presence_row["timestamp"],
             )
-            for user_id, presence_info in user_id_to_presence_info.items()
-        ]
+            for presence_row in latest_presence_per_user
+        ],
+        # Limit the size of individual network requests for very large
+        # servers.
+        batch_size=10000,
     )
 
 
