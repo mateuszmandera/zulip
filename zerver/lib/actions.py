@@ -112,6 +112,7 @@ from zerver.lib.message import (
     wildcard_mention_allowed,
 )
 from zerver.lib.notification_data import UserMessageNotificationsData, get_user_group_mentions_data
+from zerver.lib.presence import format_legacy_presence_dict
 from zerver.lib.pysa import mark_sanitized
 from zerver.lib.queue import queue_json_publish
 from zerver.lib.realm_icon import realm_icon_url
@@ -5451,7 +5452,8 @@ def send_presence_changed(user_profile: UserProfile, presence: UserPresence) -> 
         # stop sending them at all.
         return
 
-    presence_dict = presence.to_dict()
+    # The mobile app handles these events so we need to use the old format.
+    presence_dict = format_legacy_presence_dict(presence)
     event = dict(
         type="presence",
         email=user_profile.email,
@@ -5481,39 +5483,50 @@ def do_update_user_presence(
 ) -> None:
     client = consolidate_client(client)
 
+    # TODO: While we probably DO want creating an account to
+    # automatically create a first `UserPresence` object with
+    # last_connected_time and last_active_time as the current time,
+    # our presence tests don't understand this, and it'd be perhaps
+    # wrong for some cases of account creation via the API.  So we may
+    # want a "never" value here as the default.
     defaults = dict(
-        timestamp=log_time,
-        status=status,
+        last_active_time=log_time,
+        last_connected_time=log_time,
         realm_id=user_profile.realm_id,
     )
 
     (presence, created) = UserPresence.objects.get_or_create(
         user_profile=user_profile,
-        client=client,
         defaults=defaults,
     )
 
-    stale_status = (log_time - presence.timestamp) > datetime.timedelta(minutes=1, seconds=10)
-    was_idle = presence.status == UserPresence.IDLE
-    became_online = (status == UserPresence.ACTIVE) and (stale_status or was_idle)
+    time_since_last_active = log_time - presence.last_active_time
+    now_online = time_since_last_active > datetime.timedelta(
+        seconds=settings.OFFLINE_THRESHOLD_SECS - 10
+    )
+    became_online = status == UserPresence.LEGACY_STATUS_ACTIVE_INT and now_online
 
-    # If an object was created, it has already been saved.
-    #
-    # We suppress changes from ACTIVE to IDLE before stale_status is reached;
-    # this protects us from the user having two clients open: one active, the
-    # other idle. Without this check, we would constantly toggle their status
-    # between the two states.
-    if not created and stale_status or was_idle or status == presence.status:
-        # The following block attempts to only update the "status"
-        # field in the event that it actually changed.  This is
-        # important to avoid flushing the UserPresence cache when the
-        # data it would return to a client hasn't actually changed
-        # (see the UserPresence post_save hook for details).
-        presence.timestamp = log_time
-        update_fields = ["timestamp"]
-        if presence.status != status:
-            presence.status = status
-            update_fields.append("status")
+    update_fields = []
+
+    # This check is to prevent updating `last_connected_time` several
+    # times per minute with multiple connected browser windows.
+    # We also need to be careful not to wrongly "update" the timestamp if we actually already
+    # have newer presence than the reported log_time.
+    if (
+        not created
+        and log_time - presence.last_active_time > datetime.timedelta(seconds=55)
+        and log_time > presence.last_connected_time
+    ):
+        presence.last_connected_time = log_time
+        update_fields.append("last_connected_time")
+    if (
+        not created
+        and status == UserPresence.LEGACY_STATUS_ACTIVE_INT
+        and log_time > presence.last_active_time
+    ):
+        presence.last_active_time = log_time
+        update_fields.append("last_active_time")
+    if len(update_fields) > 0:
         presence.save(update_fields=update_fields)
 
     if not user_profile.realm.presence_disabled and (created or became_online):
@@ -6885,10 +6898,8 @@ def filter_presence_idle_user_ids(user_ids: Set[int]) -> List[int]:
     rows = (
         UserPresence.objects.filter(
             user_profile_id__in=user_ids,
-            status=UserPresence.ACTIVE,
-            timestamp__gte=recent,
+            last_active_time__gte=recent,
         )
-        .exclude(client__name="ZulipMobile")
         .distinct("user_profile_id")
         .values("user_profile_id")
     )
