@@ -394,7 +394,7 @@ def idseq(model_class: Any) -> str:
     elif model_class == UserPresence:
         # This table experienced a complex migration sequence that
         # renamed its sequence object.
-        return "zerver_userpresencenew_id_seq"
+        return "zerver_userpresence_id_seq1"
 
     return f"{model_class._meta.db_table}_id_seq"
 
