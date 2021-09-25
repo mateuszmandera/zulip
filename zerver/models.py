@@ -3860,7 +3860,7 @@ class UserPresence(models.Model):
         ]
 
     id: int = models.AutoField(auto_created=True, primary_key=True, verbose_name="ID")
-    user_profile: UserProfile = models.ForeignKey(UserProfile, on_delete=CASCADE)
+    user_profile: UserProfile = models.OneToOneField(UserProfile, on_delete=CASCADE, unique=True)
 
     # Realm is just here as denormalization to optimize database
     # queries to fetch all presence data for a given realm.

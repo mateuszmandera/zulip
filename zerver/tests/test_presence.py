@@ -3,6 +3,7 @@ from datetime import timedelta
 from typing import Any, Dict
 from unittest import mock
 
+from django.conf import settings
 from django.utils.timezone import now as timezone_now
 
 from zerver.lib.actions import do_deactivate_user
@@ -493,7 +494,7 @@ class UserPresenceAggregationTests(ZulipTestCase):
             latest_result_dict["presences"][user.email]["aggregated"],
             {
                 "status": status,
-                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=2)),
+                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=5)),
                 # We no longer store the client information, but keep the field in these dicts,
                 # with the value 'website' for backwards compatibility.
                 "client": "website",
@@ -505,11 +506,12 @@ class UserPresenceAggregationTests(ZulipTestCase):
 
     def test_aggregated_info(self) -> None:
         user = self.example_user("othello")
-        validate_time = timezone_now()
+        offset = datetime.timedelta(seconds=settings.PRESENCE_UPDATE_MIN_FREQ_SECONDS + 1)
+        validate_time = timezone_now() - offset
         self._send_presence_for_aggregated_tests(user, "active", validate_time)
         with mock.patch(
             "zerver.views.presence.timezone_now",
-            return_value=validate_time - datetime.timedelta(seconds=1),
+            return_value=validate_time + offset,
         ):
             result = self.api_post(
                 user,
@@ -522,7 +524,7 @@ class UserPresenceAggregationTests(ZulipTestCase):
             result_dict["presences"][user.email]["aggregated"],
             {
                 "status": "active",
-                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=1)),
+                "timestamp": datetime_to_timestamp(validate_time + offset),
                 "client": "website",  # This fields is no longer used and is permamenently set to 'website'.
             },
         )
@@ -535,7 +537,7 @@ class UserPresenceAggregationTests(ZulipTestCase):
             result_dict["presence"]["aggregated"],
             {
                 "status": "active",
-                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=2)),
+                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=5)),
             },
         )
 
@@ -547,7 +549,7 @@ class UserPresenceAggregationTests(ZulipTestCase):
             result_dict["presence"]["aggregated"],
             {
                 "status": "idle",
-                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=2)),
+                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=5)),
             },
         )
 
@@ -555,22 +557,24 @@ class UserPresenceAggregationTests(ZulipTestCase):
         user = self.example_user("othello")
         self.login_user(user)
         validate_time = timezone_now()
-        result_dict = self._send_presence_for_aggregated_tests(user, "idle", validate_time)
+        self._send_presence_for_aggregated_tests(user, "idle", validate_time)
         with mock.patch(
             "zerver.views.presence.timezone_now",
             return_value=validate_time - datetime.timedelta(seconds=3),
         ):
-            self.api_post(
+            result_dict = self.api_post(
                 user,
                 "/api/v1/users/me/presence",
                 {"status": "active"},
                 HTTP_USER_AGENT="ZulipTestDev/1.0",
-            )
+            ).json()
+
         self.assertDictEqual(
-            result_dict["presence"]["aggregated"],
+            result_dict["presences"][user.email]["aggregated"],
             {
-                "status": "idle",
-                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=2)),
+                "client": "website",
+                "status": "active",
+                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=3)),
             },
         )
 
@@ -584,7 +588,7 @@ class UserPresenceAggregationTests(ZulipTestCase):
             result_dict["presence"]["aggregated"],
             {
                 "status": "offline",
-                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=2)),
+                "timestamp": datetime_to_timestamp(validate_time - datetime.timedelta(seconds=5)),
             },
         )
 

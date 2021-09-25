@@ -3,6 +3,7 @@ import time
 from collections import defaultdict
 from typing import Any, Dict, Mapping, Sequence, Set
 
+from django.conf import settings
 from django.utils.timezone import now as timezone_now
 
 from zerver.lib.timestamp import datetime_to_timestamp
@@ -99,7 +100,8 @@ def format_legacy_presence_dict(presence: UserPresence) -> Dict[str, Any]:
     and is not meant to be used on old presence data.
     """
     if (
-        presence.last_active_time + datetime.timedelta(minutes=1, seconds=10)
+        presence.last_active_time
+        + datetime.timedelta(seconds=settings.PRESENCE_LEGACY_EVENT_OFFSET_FOR_ACTIVITY_SECONDS)
         >= presence.last_connected_time
     ):
         status = UserPresence.LEGACY_STATUS_ACTIVE

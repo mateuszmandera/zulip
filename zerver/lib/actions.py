@@ -6135,6 +6135,8 @@ def send_presence_changed(user_profile: UserProfile, presence: UserPresence) -> 
         return
 
     # The mobile app handles these events so we need to use the old format.
+    # The format of the event should also account for the slim_presence
+    # API parameter when this becomes possible in the future.
     presence_dict = format_legacy_presence_dict(presence)
     event = dict(
         type="presence",
@@ -6172,6 +6174,10 @@ def do_update_user_presence(
     # wrong for some cases of account creation via the API.  So we may
     # want a "never" value here as the default.
     defaults = dict(
+        # Given that these are defaults for creation of a UserPresence row
+        # if one doesn't yet exist, the most sensible way to do this
+        # is to set both last_active_time and last_connected_time
+        # to log_time irrespective of the status sent.
         last_active_time=log_time,
         last_connected_time=log_time,
         realm_id=user_profile.realm_id,
@@ -6194,17 +6200,16 @@ def do_update_user_presence(
     # times per minute with multiple connected browser windows.
     # We also need to be careful not to wrongly "update" the timestamp if we actually already
     # have newer presence than the reported log_time.
-    if (
-        not created
-        and log_time - presence.last_active_time > datetime.timedelta(seconds=55)
-        and log_time > presence.last_connected_time
+    if not created and log_time - presence.last_connected_time > datetime.timedelta(
+        seconds=settings.PRESENCE_UPDATE_MIN_FREQ_SECONDS
     ):
         presence.last_connected_time = log_time
         update_fields.append("last_connected_time")
     if (
         not created
         and status == UserPresence.LEGACY_STATUS_ACTIVE_INT
-        and log_time > presence.last_active_time
+        and time_since_last_active
+        > datetime.timedelta(seconds=settings.PRESENCE_UPDATE_MIN_FREQ_SECONDS)
     ):
         presence.last_active_time = log_time
         update_fields.append("last_active_time")
@@ -7564,12 +7569,6 @@ def filter_presence_idle_user_ids(user_ids: Set[int]) -> List[int]:
     # currently idle and should potentially get email notifications
     # (and push notifications with with
     # user_profile.enable_online_push_notifications=False).
-    #
-    # We exclude any presence data from ZulipMobile for the purpose of
-    # triggering these notifications; the mobile app can more
-    # effectively do its own client-side filtering of notification
-    # sounds/etc. for the case that the user is actively doing a PM
-    # conversation in the app.
 
     if not user_ids:
         return []
