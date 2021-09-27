@@ -10,7 +10,7 @@ from django.contrib.auth.views import (
     PasswordResetConfirmView,
     PasswordResetDoneView,
 )
-from django.urls import path
+from django.urls import path, re_path
 from django.urls.resolvers import URLPattern, URLResolver
 from django.utils.module_loading import import_string
 from django.views.generic import RedirectView, TemplateView
@@ -742,7 +742,17 @@ urls += [path("saml/metadata.xml", saml_sp_metadata)]
 
 # SCIM2
 
+from django_scim import views as scim_views
+
 urls += [
+    re_path(
+        r"^scim/v2/Groups/.search$",
+        scim_views.SCIMView.as_view(implemented=False),
+    ),
+    re_path(
+        r"^scim/v2/Groups(?:/(?P<uuid>[^/]+))?$",
+        scim_views.SCIMView.as_view(implemented=False),
+    ),
     path("scim/v2/", include("django_scim.urls", namespace="scim")),
 ]
 

@@ -489,6 +489,10 @@ def write_instrumentation_reports(full_suite: bool, include_webhooks: bool) -> N
             "static/(?P<path>.+)",
             "flush_caches",
             "external_content/(?P<digest>[^/]+)/(?P<received_url>[^/]+)",
+            # These are SCIM2 urls overriden from django_scim2 and are not meant to be tested.
+            # TODO: Test them.
+            "scim/v2/Groups(?:/(?P<uuid>[^/]+))?",
+            "scim/v2/Groups/.search",
             *(webhook.url for webhook in WEBHOOK_INTEGRATIONS if not include_webhooks),
         }
 
