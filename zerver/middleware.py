@@ -676,8 +676,12 @@ class ZulipCommonMiddleware(CommonMiddleware):
 
 def validate_scim_bearer_token(request: HttpRequest) -> Optional[UserProfile]:
     subdomain = get_subdomain(request)
-    valid_bearer_token = settings.SCIM_CONFIG.get(subdomain, {}).get("bearer_token")
-    scim_bot_email = settings.SCIM_CONFIG.get(subdomain, {}).get("scim_bot")
+    scim_config_dict = settings.SCIM_CONFIG.get(subdomain)
+    if not scim_config_dict:
+        return None
+
+    valid_bearer_token = scim_config_dict.get("bearer_token")
+    scim_bot_email = scim_config_dict.get("scim_bot")
     # We really don't want a misconfiguration where this is unset,
     # allowing free access to the SCIM API:
     assert valid_bearer_token
