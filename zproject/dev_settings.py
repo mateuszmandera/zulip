@@ -180,4 +180,10 @@ SOCIAL_AUTH_SUBDOMAIN = "auth"
 
 MEMCACHED_USERNAME: Optional[str] = None
 
-SCIM_BEARER_TOKENS = {"zulip": ("token1234", "scim-bot@zulip.com")}
+SCIM_CONFIG = {
+    "zulip": {
+        "bearer_token": "token1234",
+        "scim_bot": "scim-bot@zulip.com",
+        "name_formatted_included": True,
+    }
+}

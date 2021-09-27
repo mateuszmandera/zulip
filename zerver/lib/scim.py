@@ -2,6 +2,7 @@ from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import django_scim.constants as scim_constants
 import django_scim.exceptions as scim_exceptions
+from django.conf import settings
 from django.core.validators import ValidationError, validate_email
 from django.db import models, transaction
 from django.http import HttpRequest
@@ -35,6 +36,7 @@ class ZulipSCIMUser(SCIMUser):
 
         super().__init__(obj, request)
         self.subdomain = get_subdomain(request)
+        self.config = settings.SCIM_CONFIG[self.subdomain]
 
         self._email_new_value: Optional[str] = None
         self._is_active_new_value: Optional[bool] = None
@@ -59,14 +61,25 @@ class ZulipSCIMUser(SCIMUser):
         Return a ``dict`` conforming to the SCIM User Schema,
         ready for conversion to a JSON object.
         """
+        if self.config["name_formatted_included"]:
+            name = {
+                "formatted": self.obj.full_name,
+            }
+        else:
+            if " " not in self.obj.full_name:
+                first_name, last_name = "", self.obj.full_name
+            else:
+                first_name, last_name = self.obj.full_name.split(" ", 1)
+            name = {
+                "givenName": first_name,
+                "familyName": last_name,
+            }
         d = dict(
             {
                 "schemas": [scim_constants.SchemaURI.USER],
                 "id": self.obj.id,
                 "userName": self.obj.delivery_email,
-                "name": {
-                    "formatted": self.obj.full_name,
-                },
+                "name": name,
                 "displayName": self.display_name,
                 "active": self.obj.is_active,
                 # meta is a property implemented in the superclass
@@ -93,7 +106,15 @@ class ZulipSCIMUser(SCIMUser):
         if self.obj.delivery_email != email:
             self._email_new_value = email
 
-        full_name = d.get("name", {}).get("formatted", "")
+        name_attr_dict = d.get("name", {})
+        if self.config["name_formatted_included"]:
+            full_name = name_attr_dict.get("formatted", "")
+        else:
+            # Some providers (e.g. Okta) don't provide name.formatted.
+            first_name = name_attr_dict.get("givenName", "")
+            last_name = name_attr_dict.get("familyName", "")
+            full_name = f"{first_name} {last_name}".strip()
+
         if full_name and self.obj.full_name != full_name:
             assert isinstance(full_name, str)
             self._full_name_new_value = full_name

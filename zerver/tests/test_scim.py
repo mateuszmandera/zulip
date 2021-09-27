@@ -23,7 +23,7 @@ class TestSCIM(ZulipTestCase):
         )
 
     def scim_headers(self) -> Mapping[str, str]:
-        return {"HTTP_AUTHORIZATION": f"Bearer {settings.SCIM_BEARER_TOKENS['zulip'][0]}"}
+        return {"HTTP_AUTHORIZATION": f"Bearer {settings.SCIM_CONFIG['zulip']['bearer_token']}"}
 
     def generate_user_schema(self, user_profile: UserProfile) -> Dict[str, Any]:
         return {
