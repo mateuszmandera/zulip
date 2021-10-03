@@ -46,13 +46,7 @@ from zerver.lib.subdomains import get_subdomain
 from zerver.lib.types import ViewFuncT
 from zerver.lib.user_agent import parse_user_agent
 from zerver.lib.utils import statsd
-from zerver.models import (
-    Realm,
-    UserProfile,
-    flush_per_request_caches,
-    get_realm,
-    get_user_by_delivery_email,
-)
+from zerver.models import Realm, SCIMClient, flush_per_request_caches, get_realm
 
 logger = logging.getLogger("zulip.requests")
 slow_query_logger = logging.getLogger("zulip.slow_queries")
@@ -674,25 +668,27 @@ class ZulipCommonMiddleware(CommonMiddleware):
         return super().should_redirect_with_slash(request)
 
 
-def validate_scim_bearer_token(request: HttpRequest) -> Optional[UserProfile]:
+def validate_scim_bearer_token(request: HttpRequest) -> Optional[SCIMClient]:
     subdomain = get_subdomain(request)
     scim_config_dict = settings.SCIM_CONFIG.get(subdomain)
     if not scim_config_dict:
         return None
 
     valid_bearer_token = scim_config_dict.get("bearer_token")
-    scim_bot_email = scim_config_dict.get("scim_bot")
+    scim_client_name = scim_config_dict.get("scim_client_name")
     # We really don't want a misconfiguration where this is unset,
     # allowing free access to the SCIM API:
     assert valid_bearer_token
-    assert scim_bot_email
+    assert scim_client_name
 
     if request.headers.get("Authorization") != f"Bearer {valid_bearer_token}":
         return None
 
     request_notes = RequestNotes.get_notes(request)
     assert request_notes.realm
-    return get_user_by_delivery_email(scim_bot_email, request_notes.realm)
+    # This can be made more efficient by caching - but until the volume of SCIM requests
+    # becomes high, doing a db query here should be fine.
+    return SCIMClient.objects.get(realm=request_notes.realm, name=scim_client_name)
 
 
 class ZulipSCIMAuthCheckMiddleware(SCIMAuthCheckMiddleware):
@@ -703,11 +699,11 @@ class ZulipSCIMAuthCheckMiddleware(SCIMAuthCheckMiddleware):
         if not request.path.startswith(self.reverse_url):
             return None
 
-        scim_bot = validate_scim_bearer_token(request)
-        if not scim_bot:
+        scim_client = validate_scim_bearer_token(request)
+        if not scim_client:
             response = HttpResponse(status=401)
             response["WWW-Authenticate"] = scim_settings.WWW_AUTHENTICATE_HEADER
             return response
 
-        request.user = scim_bot
+        request.user = scim_client
         return None

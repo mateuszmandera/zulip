@@ -205,7 +205,7 @@ class ZulipSCIMUser(SCIMUser):
                 password,
                 realm,
                 full_name_new_value,
-                acting_user=self._request.user,
+                acting_user=None,
             )
             return
 
@@ -218,9 +218,9 @@ class ZulipSCIMUser(SCIMUser):
                 do_change_user_delivery_email(self.obj, email_new_value)
 
             if is_active_new_value is not None and is_active_new_value:
-                do_reactivate_user(self.obj, acting_user=self._request.user)
+                do_reactivate_user(self.obj, acting_user=None)
             elif is_active_new_value is not None and not is_active_new_value:
-                do_deactivate_user(self.obj, acting_user=self._request.user)
+                do_deactivate_user(self.obj, acting_user=None)
 
     def delete(self) -> None:
         """

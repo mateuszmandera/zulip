@@ -4,22 +4,16 @@ import orjson
 from django.conf import settings
 from django.http import HttpResponse
 
-from zerver.lib.actions import do_create_user
 from zerver.lib.test_classes import ZulipTestCase
-from zerver.models import UserProfile, get_realm
+from zerver.models import SCIMClient, UserProfile, get_realm
 
 
 class TestSCIM(ZulipTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.realm = get_realm("zulip")
-        self.scim_bot = do_create_user(
-            "scim-bot@zulip.com",
-            None,
-            self.realm,
-            "SCIM Bot",
-            bot_type=UserProfile.DEFAULT_BOT,
-            acting_user=None,
+        self.scim_client = SCIMClient.objects.create(
+            realm=self.realm, name=settings.SCIM_CONFIG["zulip"]["scim_client_name"]
         )
 
     def scim_headers(self) -> Mapping[str, str]:
