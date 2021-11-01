@@ -272,6 +272,7 @@ def register_remote_user(request: HttpRequest, result: ExternalAuthResult) -> Ht
     kwargs.pop("subdomain", None)
     kwargs.pop("redirect_to", None)
     kwargs.pop("is_realm_creation", None)
+    kwargs.pop("params_to_store_in_authenticated_session", None)
 
     kwargs["password_required"] = False
     return maybe_send_to_registration(request, **kwargs)
@@ -296,6 +297,10 @@ def login_or_register_remote_user(request: HttpRequest, result: ExternalAuthResu
     * A zulip:// URL to send control back to the mobile or desktop apps if they
       are doing authentication using the mobile_flow_otp or desktop_flow_otp flow.
     """
+
+    for key, value in result.data_dict.get("params_to_store_in_authenticated_session", {}).items():
+        request.session[key] = value
+
     user_profile = result.user_profile
     if user_profile is None or user_profile.is_mirror_dummy:
         return register_remote_user(request, result)
