@@ -34,11 +34,15 @@ from django.urls import reverse
 from django.utils.translation import gettext as _
 from django_auth_ldap.backend import LDAPBackend, _LDAPUser, ldap_error
 from lxml.etree import XMLSyntaxError
+from onelogin.saml2 import compat as onelogin_saml2_compat
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.errors import OneLogin_Saml2_Error
 from onelogin.saml2.logout_request import OneLogin_Saml2_Logout_Request
+from onelogin.saml2.logout_response import OneLogin_Saml2_Logout_Response
 from onelogin.saml2.response import OneLogin_Saml2_Response
 from onelogin.saml2.settings import OneLogin_Saml2_Settings
+from onelogin.saml2.utils import OneLogin_Saml2_Utils
+from onelogin.saml2.xml_utils import OneLogin_Saml2_XML
 from requests import HTTPError
 from social_core.backends.apple import AppleIdAuth
 from social_core.backends.azuread import AzureADOAuth2
@@ -56,6 +60,7 @@ from social_core.exceptions import (
     SocialAuthBaseException,
 )
 from social_core.pipeline.partial import partial
+from social_django.utils import load_backend, load_strategy
 from typing_extensions import TypedDict
 from zxcvbn import zxcvbn
 
@@ -2194,9 +2199,28 @@ class SAMLDocument:
         self.encoded_saml_message = encoded_saml_message
         self.backend = backend
 
+        self._decoded_saml_message: Optional[str] = None
+
     @property
     def logger(self) -> logging.Logger:
         return self.backend.logger
+
+    @property
+    def decoded_saml_message(self) -> str:
+        """
+        Returns the decoded SAMLRequest/SAMLResponse.
+        """
+        if self._decoded_saml_message is None:
+            # This logic is taken from how
+            # python3-saml handles decoding received SAMLRequest
+            # and SAMLResponse params.
+            self._decoded_saml_message = onelogin_saml2_compat.to_string(
+                OneLogin_Saml2_Utils.decode_base64_and_inflate(
+                    self.encoded_saml_message, ignore_zip=True
+                )
+            )
+
+        return self._decoded_saml_message
 
     def document_type(self) -> str:
         """
@@ -2255,13 +2279,31 @@ class SAMLResponse(SAMLDocument):
         saml_settings = OneLogin_Saml2_Settings(config, sp_validation_only=True)
 
         try:
-            resp = OneLogin_Saml2_Response(
-                settings=saml_settings, response=self.encoded_saml_message
-            )
-            return resp.get_issuers()
+            if not self.is_logout_response():
+                resp = OneLogin_Saml2_Response(
+                    settings=saml_settings, response=self.encoded_saml_message
+                )
+                return resp.get_issuers()
+            else:
+                logout_response = OneLogin_Saml2_Logout_Response(
+                    settings=saml_settings, response=self.encoded_saml_message
+                )
+                return logout_response.get_issuer()
         except self.SAML_PARSING_EXCEPTIONS as e:
             self.logger.error("Error parsing SAMLResponse: %s", str(e))
             return []
+
+    def is_logout_response(self) -> bool:
+        """
+        Checks whether the SAMLResponse is a LogoutResponse based on some
+        basic XML parsing.
+        """
+
+        try:
+            parsed_xml = OneLogin_Saml2_XML.to_etree(self.decoded_saml_message)
+            return bool(OneLogin_Saml2_XML.query(parsed_xml, "/samlp:LogoutResponse"))
+        except self.SAML_PARSING_EXCEPTIONS:
+            return False
 
 
 @external_auth_method
@@ -2561,6 +2603,8 @@ class SAMLAuthBackend(SocialAuthMixin, SAMLAuth):
 
         if isinstance(saml_document, SAMLRequest):
             return self.process_logout(subdomain, idp_name)
+        elif isinstance(saml_document, SAMLResponse) and saml_document.is_logout_response():
+            return SAMLSPInitiatedLogout.process_logout_response(saml_document, idp_name)
 
         result = None
         try:
@@ -2745,6 +2789,70 @@ def validate_otp_params(
 
     if mobile_flow_otp and desktop_flow_otp:
         raise JsonableError(_("Can't use both mobile_flow_otp and desktop_flow_otp together."))
+
+
+class SAMLSPInitiatedLogout:
+    @classmethod
+    def get_logged_in_user_idp(cls, request: HttpRequest) -> Optional[str]:
+        """
+        Information about the authentication method which was used for
+        this session is stored in authentication_method session attribute.
+        If SAML was used, this extracts the IdP name and returns it.
+        """
+        # Some asserts to ensure this doesn't get called incorrectly:
+        assert hasattr(request, "user")
+        assert isinstance(request.user, UserProfile)
+
+        authentication_method = request.session.get("authentication_method", "")
+        if not authentication_method.startswith("saml:"):
+            return None
+
+        return authentication_method.split("saml:")[1]
+
+    @classmethod
+    def slo_request_to_idp(
+        cls, request: HttpRequest, return_to: Optional[str] = None
+    ) -> Optional[HttpResponse]:
+        """
+        Generates the redirect to the IdP's SLO endpoint with
+        the appropriately generated LogoutRequest or None if the session
+        wasn't authenticated via SAML.
+        """
+
+        user_profile = request.user
+        realm = user_profile.realm
+        assert saml_auth_enabled(realm)
+
+        complete_url = reverse("social:complete", args=("saml",))
+        saml_backend = load_backend(load_strategy(request), "saml", complete_url)
+
+        idp_name = cls.get_logged_in_user_idp(request)
+        if idp_name is None:
+            return None
+
+        idp = saml_backend.get_idp(idp_name)
+        auth = saml_backend._create_saml_auth(idp)
+        slo_url = auth.logout(name_id=user_profile.delivery_email, return_to=return_to)
+
+        return HttpResponseRedirect(slo_url)
+
+    @classmethod
+    def process_logout_response(cls, logout_response: SAMLResponse, idp_name: str) -> HttpResponse:
+        """
+        Validates the LogoutResponse and logs out the user if successful,
+        finishing the SP-initiated logout flow.
+        """
+        from django.contrib.auth.views import logout_then_login as django_logout_then_login
+
+        idp = logout_response.backend.get_idp(idp_name)
+        auth = logout_response.backend._create_saml_auth(idp)
+        auth.process_slo(keep_local_session=True)
+        errors = auth.get_errors()
+        if errors:
+            raise JsonableError(f"LogoutResponse error: {errors}")
+
+        # We call Django's version of logout_then_login so that POST isn't required.
+        return django_logout_then_login(logout_response.backend.strategy.request)
 
 
 def get_external_method_dicts(realm: Optional[Realm] = None) -> List[ExternalAuthMethodDictT]:

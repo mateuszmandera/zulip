@@ -610,13 +610,15 @@ to the root and `engineering` subdomains:
          importing, only the certificate will be displayed (not the private
          key).
 
-### IdP-initiated SAML Logout
+### SAML Logout
 
-Zulip 5.0 introduces beta support for IdP-initiated SAML Logout. The
-implementation has primarily been tested with Keycloak and these
+Zulip 5.0 introduces beta support for both IdP-initiated and SP-initiated
+SAML Logout. The implementation has primarily been tested with Keycloak and these
 instructions are for that provider; please [contact
 us](https://zulip.com/help/contact-support) for help using this with
 another IdP.
+
+#### IdP-initated Logout
 
 1. In the KeyCloak configuration for Zulip, enable `Force Name ID Format`
    and set `Name ID Format` to `email`. Zulip needs to receive
@@ -655,11 +657,24 @@ another IdP.
    /home/zulip/deployments/current/manage.py logout_all_users
    ```
 
+#### SP-initiated Logout
+
+After configuring IdP-initiated Logout, you only need to set
+`SAML_ENABLE_SP_INITIATED_SINGLE_LOGOUT = True` in `/etc/zulip/settings.py`
+to also enable SP-initiated Logout. When this is active,
+a user who logged in to Zulip via SAML, upon clicking
+"Logout". will be redirected to the IdP's SLO endpoint with a LogoutRequest
+and if a successful LogoutResponse is received back, their current Zulip
+session will be terminated.
+
 #### Caveats
 
 - This beta doesn't support using `SessionIndex` to limit which
-  sessions are affected; it always terminates all logged-in sessions
-  for the user identified in the `NameID`.
+  sessions are affected; in IdP-initiated Logout it always terminates
+  all logged-in sessions for the user identified in the `NameID`.
+  In SP-initiated Logout this simply means that Zulip does not include
+  `SessionIndex` in the `LogoutRequest` to the IdP - however, that doesn't
+  seem to cause any undesired behavior with Keycloak.
 - SAML Logout in a configuration where your IdP handles authentication
   for multiple organizations is not yet supported.
 
