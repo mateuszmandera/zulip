@@ -166,6 +166,7 @@ ALL_ZULIP_TABLES = {
     "zerver_userprofile",
     "zerver_userprofile_groups",
     "zerver_userprofile_user_permissions",
+    "zerver_userpushnotificationidentity",
     "zerver_userstatus",
     "zerver_usertopic",
     "zerver_muteduser",
@@ -240,6 +241,10 @@ NON_EXPORTED_TABLES = {
     "zerver_submessage",
     # Drafts don't need to be exported as they are supposed to be more ephemeral.
     "zerver_draft",
+    # The UserPushNotificationIdentity table doesn't make sense to export and is meant to
+    # be re-generated upon import.
+    # BLOCKER TODO: Add the re-generation in the import system!
+    "zerver_userpushnotificationidentity",
     # For any tables listed below here, it's a bug that they are not present in the export.
 }
 

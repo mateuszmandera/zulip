@@ -17,6 +17,7 @@ from zerver.models import (
     Subscription,
     UserBaseSettings,
     UserProfile,
+    UserPushNotificationIdentity,
     get_fake_email_domain,
 )
 
@@ -209,4 +210,5 @@ def create_user(
     Subscription.objects.create(
         user_profile=user_profile, recipient=recipient, is_user_active=user_profile.is_active
     )
+    UserPushNotificationIdentity.objects.create(user_profile=user_profile)
     return user_profile

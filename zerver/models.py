@@ -17,6 +17,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from uuid import UUID, uuid4
 
 import django.contrib.auth
 import orjson
@@ -2055,6 +2056,9 @@ class UserProfile(AbstractBaseUser, PermissionsMixin, UserBaseSettings):
         else:
             return -1
 
+    def uuid(self) -> str:
+        return str(self.userpushnotificationidentity.uuid)
+
     def format_requestor_for_logs(self) -> str:
         return "{}@{}".format(self.id, self.realm.string_id or "root")
 
@@ -2100,6 +2104,12 @@ class UserGroup(models.Model):
 
     class Meta:
         unique_together = (("realm", "name"),)
+
+
+class UserPushNotificationIdentity(models.Model):
+    id: int = models.AutoField(auto_created=True, primary_key=True, verbose_name="ID")
+    user_profile: UserProfile = models.OneToOneField(UserProfile, on_delete=CASCADE, null=False)
+    uuid: UUID = models.UUIDField(default=uuid4, unique=True)
 
 
 class UserGroupMembership(models.Model):
