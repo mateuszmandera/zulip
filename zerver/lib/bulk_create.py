@@ -5,7 +5,15 @@ from django.db.models import Model
 from zerver.lib.create_user import create_user_profile, get_display_email_address
 from zerver.lib.initial_password import initial_password
 from zerver.lib.streams import render_stream_description
-from zerver.models import Realm, RealmAuditLog, Recipient, Stream, Subscription, UserProfile
+from zerver.models import (
+    Realm,
+    RealmAuditLog,
+    Recipient,
+    Stream,
+    Subscription,
+    UserProfile,
+    UserPushNotificationIdentity,
+)
 
 
 def bulk_create_users(
@@ -69,11 +77,16 @@ def bulk_create_users(
     )
 
     recipients_to_create: List[Recipient] = []
+    user_push_notification_identities_to_create: List[UserPushNotificationIdentity] = []
     for user_id in user_ids:
         recipient = Recipient(type_id=user_id, type=Recipient.PERSONAL)
         recipients_to_create.append(recipient)
 
+        user_push_notification_identity = UserPushNotificationIdentity(user_profile_id=user_id)
+        user_push_notification_identities_to_create.append(user_push_notification_identity)
+
     Recipient.objects.bulk_create(recipients_to_create)
+    UserPushNotificationIdentity.objects.bulk_create(user_push_notification_identities_to_create)
 
     bulk_set_users_or_streams_recipient_fields(
         UserProfile, profiles_to_create, recipients_to_create
