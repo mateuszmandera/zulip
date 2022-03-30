@@ -146,7 +146,7 @@ if __name__ == "__main__":
     oneclick_image_name = f"oneclickapp-{release_version}"
     create_snapshot(image_generator_droplet, oneclick_image_name)
     snapshot = image_generator_droplet.get_snapshots()[0]
-    send_message(f"One click app image `{oneclick_image_name}` created.")
+    # send_message(f"One click app image `{oneclick_image_name}` created.")
 
     image_generator_droplet.destroy()
     action_public_ssh_key_object.destroy()
@@ -154,6 +154,6 @@ if __name__ == "__main__":
     test_droplet_name = f"oneclickapp-{release_version}-test"
     test_droplet = create_droplet(test_droplet_name, manager.get_all_sshkeys(), image=snapshot.id)
     create_dns_records(test_droplet)
-    send_message(
-        f"Test droplet `{test_droplet_name}` created. SSH as root to {TEST_DROPLET_SUBDOMAIN}.oneclick.zulip.dev for testing."
-    )
+    # send_message(
+    #     f"Test droplet `{test_droplet_name}` created. SSH as root to {TEST_DROPLET_SUBDOMAIN}.oneclick.zulip.dev for testing."
+    # )
