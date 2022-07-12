@@ -107,6 +107,9 @@ def create_dns_records(droplet: digitalocean.Droplet) -> None:
 
 
 def setup_one_click_app_installer(droplet: digitalocean.Droplet) -> None:
+    if droplet.ip_address is None:
+        send_message("The droplet has None .ip_address!")
+
     subprocess.check_call(
         [
             "fab",
