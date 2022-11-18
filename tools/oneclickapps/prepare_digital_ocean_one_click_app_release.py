@@ -44,7 +44,13 @@ def sleep_until_droplet_action_is_completed(
                 break
         if incomplete:
             time.sleep(5)
-    droplet.load()
+    print("First stage complete")
+    while True:
+        droplet.load()
+        if droplet.ip_address:
+            break
+        print("sleeping for ip")
+        time.sleep(5)
 
 
 def set_api_request_retry_limits(api_object: digitalocean.baseapi.BaseAPI) -> None:
