@@ -21,7 +21,7 @@ jobs:
           RELEASE_VERSION: ${{ github.event.release.tag_name }}
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          git clone https://github.com/zulip/marketplace-partners
+          git clone https://github.com/mateuszmandera/marketplace-partners
           pip3 install python-digitalocean zulip fab-classic PyNaCl
           echo $PATH
           python3 tools/oneclickapps/prepare_digital_ocean_one_click_app_release.py
