@@ -8950,14 +8950,18 @@ paths:
   /users/me/presence:
     post:
       operationId: update-presence
-      summary: Update your presence
+      summary: Update your presence status and fetch presence data for the realm
       tags: ["users"]
       description: |
-        Change your presence information.
+        Update your presence status and fetch presence of other users in realm
+        in a bulk.
 
-        If `ping_only` parameter is `false`, the presence information of all
-        the users in the organization is included in the response. If the
-        `CAN_ACCESS_ALL_USERS_GROUP_LIMITS_PRESENCE` server-level
+        This is the endpoint meant to be used by clients for both reporting
+        their presence status to the server and obtaining the presence info
+        of all other users to build the buddy list by polling it regularly,
+        in parallel with receiving presence update events via the event system.
+
+        If the `CAN_ACCESS_ALL_USERS_GROUP_LIMITS_PRESENCE` server-level
         setting is set to `true`, presence information of only accessible
         users is included in the response.
 
@@ -8984,33 +8988,55 @@ paths:
                 ping_only:
                   type: boolean
                   description: |
-                    If `true`, the presence information of other users will not
-                    be included in the response.
-                  example: true
-                new_user_input:
-                  type: boolean
-                  description: |
-                    Whether the user on this client has interacted with the system recently.
-                  example: true
-                slim_presence:
-                  type: boolean
-                  description: |
-                    Setting this to `true` will make presence dictionaries be keyed by
-                    user ID instead of Zulip API email.
-
-                    **Changes**: New in Zulip 3.0 (Unstable with no feature level yet).
-                  example: true
+                    Whether the client is sending a ping-only request, meaning
+                    it only wants to update the user's presence status. Otherwise,
+                    also requests the server to return presence data of all users
+                    in the realm, further affected by the `last_update_id` parameter.
+                  example: false
+                  default: false
                 last_update_id:
                   type: integer
                   description: |
-                    If specified, server will only fetch presence data with `last_update_id`
-                    greater than the provided value of this parameter.
+                    Specifies the greatest last_update_id of presence data of users
+                    in the realm obtained by the client. The server will only return
+                    presence data more recent than that.
+
+                    This parameter should be set to `-1` at initialization of the
+                    client in order to fetch all data. Afterwards, its value should
+                    be obtained by reading `presence_last_update_id` from the server's
+                    response to the previous request in order to implement incremental
+                    fetches of the data.
 
                     The client specifying this parameter implies it uses the modern API
                     format, so `slim_presence=true` will be assumed by the server.
 
                     **Changes**: New in Zulip 9.0 (feature level 263).
                   example: 5
+                slim_presence:
+                  description: |
+                    Determines the format in which the server will return presence data
+                    for the realm. Use the value of `true` for the modern format. The legacy
+                    format, sent when `slim_presence` is `false`, is deprecated.
+
+                    **Note**: If the `last_update_id` parameter is specified, it implies
+                    `slim_presence=true`. Clients should omit specifying `slim_presence`
+                    if they're sending `last_update_id`.
+
+                    **Changes**: New in Zulip 3.0 (Unstable with no feature level yet).
+
+                    **Changes**: In Zulip 9.0 (feature level 263), `last_update_id` in the request
+                    now implies `slim_presence=true`.
+                  type: boolean
+                  example: false
+                  default: false
+                new_user_input:
+                  description: |
+                    Whether the user has interacted with the client recently. This only
+                    affects updates to the server-side UserActivity data, not further
+                    documented or exposed to clients.
+                  type: boolean
+                  example: false
+                  default: false
               required:
                 - status
       responses:
@@ -9022,20 +9048,23 @@ paths:
                 allOf:
                   - $ref: "#/components/schemas/JsonSuccessBase"
                   - additionalProperties: false
+                    required:
+                      - result
+                      - msg
                     properties:
                       result: {}
                       msg: {}
                       ignored_parameters_unsupported: {}
                       presence_last_update_id:
                         type: integer
-                        nullable: true
                         description: |
                           Provides the `last_update_id` value of the latest presence data fetched by
-                          the server and included in the response in `presences`. This can be used
-                          as the value of the `presence_last_update_id` parameter when polling
-                          for presence data at the [/users/me/presence](/api/update-presence) endpoint
-                          to tell the server to only fetch the relevant newer data in order to skip
-                          redundant already-known presence information.
+                          the server and included in the response in `presences`. This allows
+                          the client to have an identifier number up to which it knows it has obtained
+                          all the presence data. The client should then pass this value when
+                          querying the endpoint next time, in order to only
+                          receive newer presence data to avoid redundant
+                          fetching of already known information.
 
                           **Changes**: New in Zulip 9.0 (feature level 263).
                       server_timestamp:
@@ -9047,9 +9076,8 @@ paths:
                       zephyr_mirror_active:
                         type: boolean
                         description: |
-                          Whether the mirror bot of the user has been active in the Zephyr
-                          mirror realm. This is present when the organization is a Zephyr
-                          mirror realm.
+                          Undocumented. This is only present for zephyr mirror realms
+                          and normal clients won't see this property.
                       presences:
                         type: object
                         description: |
@@ -9086,25 +9114,15 @@ paths:
                         "msg": "",
                         "presences":
                           {
-                            "iago@zulip.com":
+                            "10":
                               {
-                                "website":
-                                  {
-                                    "client": "website",
-                                    "pushable": false,
-                                    "status": "active",
-                                    "timestamp": 1656958485,
-                                  },
-                                "aggregated":
-                                  {
-                                    "client": "website",
-                                    "status": "active",
-                                    "timestamp": 1656958485,
-                                  },
+                                "idle_timestamp": 1656958530,
+                                "active_timestamp": 1656958520,
                               },
                           },
                         "result": "success",
                         "server_timestamp": 1656958539.6287155,
+                        "presence_last_update_id": 1000,
                       }
   /users/me/status:
     post:
