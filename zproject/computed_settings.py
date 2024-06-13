@@ -442,10 +442,7 @@ ROOT_DOMAIN_URI = EXTERNAL_URI_SCHEME + EXTERNAL_HOST
 S3_KEY = get_secret("s3_key")
 S3_SECRET_KEY = get_secret("s3_secret_key")
 
-# GCM tokens are IP-whitelisted; if we deploy to additional
-# servers you will need to explicitly add their IPs here:
-# https://cloud.google.com/console/project/apps~zulip-android/apiui/credential
-ANDROID_GCM_API_KEY = get_secret("android_gcm_api_key")
+# TODO: What's the correct version of the old comment?
 
 DROPBOX_APP_KEY = get_secret("dropbox_app_key")
 
