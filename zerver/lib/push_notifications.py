@@ -164,6 +164,7 @@ class APNsContext:
 
 
 def has_apns_credentials() -> bool:
+    return True
     return settings.APNS_TOKEN_KEY_FILE is not None or settings.APNS_CERT_FILE is not None
 
 
@@ -460,6 +461,7 @@ def send_android_push_notification(
     options: Additional options to control the FCM message sent.
         For details, see `parse_fcm_options`.
     """
+    logger.info("Entering send_android_push_notification")
     if not devices:
         return 0
     if not fcm_app:
@@ -494,6 +496,7 @@ def send_android_push_notification(
         )
         for token in token_list
     ]
+    logger.info("Data: %s, token_list: %s, messages: %s", data, token_list, messages)
 
     try:
         batch_response = firebase_messaging.send_each(messages, app=fcm_app)
@@ -543,7 +546,9 @@ def uses_notification_bouncer() -> bool:
 
 
 def sends_notifications_directly() -> bool:
-    return has_apns_credentials() and has_fcm_credentials() and not uses_notification_bouncer()
+    result = has_apns_credentials() and has_fcm_credentials() and not uses_notification_bouncer()
+    logger.info("Server sends notifications directly: %s", result)
+    return result
 
 
 def send_notifications_to_bouncer(
@@ -1500,7 +1505,10 @@ def send_test_push_notification_directly_to_devices(
 
 def send_test_push_notification(user_profile: UserProfile, devices: List[PushDeviceToken]) -> None:
     base_payload = get_base_payload(user_profile)
+
+    logger.info("Sending test notification to user %s", user_profile)
     if uses_notification_bouncer():
+        logger.info("Uses bouncer")
         for device in devices:
             post_data = {
                 "realm_uuid": str(user_profile.realm.uuid),
@@ -1517,6 +1525,7 @@ def send_test_push_notification(user_profile: UserProfile, devices: List[PushDev
         return
 
     # This server doesn't need the bouncer, so we send directly to the device.
+    logger.info("taking bouncer codepath")
     user_identity = UserPushIdentityCompat(
         user_id=user_profile.id, user_uuid=str(user_profile.uuid)
     )
