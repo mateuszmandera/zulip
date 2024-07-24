@@ -178,6 +178,7 @@ def map_messages_to_attachments(data: TableData) -> None:
             )
 
 
+
 def update_id_map(table: TableName, old_id: int, new_id: int) -> None:
     if table not in ID_MAP:
         raise Exception(
