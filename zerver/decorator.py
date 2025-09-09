@@ -74,6 +74,8 @@ ReturnT = TypeVar("ReturnT")
 def update_user_activity(
     request: HttpRequest, user_profile: UserProfile, query: str | None
 ) -> None:
+    return
+
     # update_active_status also pushes to RabbitMQ, and it seems
     # redundant to log that here as well.
     if request.META["PATH_INFO"] == "/json/users/me/presence":
