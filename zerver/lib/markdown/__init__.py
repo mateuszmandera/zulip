@@ -2780,6 +2780,18 @@ def render_message_markdown(
     """
     This is basically just a wrapper for do_render_markdown.
     """
+    return MessageRenderingResult(
+        rendered_content=content,
+        mentions_topic_wildcard=False,
+        mentions_stream_wildcard=False,
+        mentions_user_ids=set(),
+        mentions_user_group_ids=set(),
+        alert_words=set(),
+        links_for_preview=set(),
+        user_ids_with_alert_words=set(),
+        potential_attachment_path_ids=set(),
+        thumbnail_spinners=set(),
+    )
 
     if realm is None:
         realm = message.get_realm()
