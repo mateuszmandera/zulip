@@ -74,6 +74,17 @@ class UserPresence(models.Model):
 
         return None
 
+class UserBuddyList(models.Model):
+    user_profile = models.OneToOneField(
+        UserProfile,
+        on_delete=CASCADE,
+        related_name="buddy_list",
+    )
+    members = models.ManyToManyField(
+        UserProfile,
+        # lists a user belongs to
+        related_name="buddy_lists",
+    )
 
 class PresenceSequence(models.Model):
     """

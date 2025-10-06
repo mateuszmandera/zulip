@@ -5,11 +5,13 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from django.conf import settings
+from django.db.models import Exists, OuterRef
 from django.utils.timezone import now as timezone_now
 
 from zerver.lib.timestamp import datetime_to_timestamp
 from zerver.lib.users import check_user_can_access_all_users, get_accessible_user_ids
 from zerver.models import Realm, UserPresence, UserProfile
+from zerver.models.presence import UserBuddyList
 
 
 def get_presence_dicts_for_rows(
@@ -174,11 +176,24 @@ def get_presence_dict_by_realm(
         kwargs["last_connected_time__gte"] = fetch_since_datetime
 
     if history_limit_days != 0:
-        query = UserPresence.objects.filter(
-            realm_id=realm.id,
-            user_profile__is_active=True,
-            user_profile__is_bot=False,
-            **kwargs,
+        assert requesting_user_profile is not None
+        BuddyThrough = UserBuddyList.members.through
+
+        buddies_exists = BuddyThrough.objects.filter(
+            userbuddylist_id=requesting_user_profile.buddy_list.id,
+            userprofile_id=OuterRef("user_profile_id"),
+        )
+
+        query = (
+            UserPresence.objects
+            .filter(
+                realm_id=realm.id,
+                user_profile__is_active=True,
+                user_profile__is_bot=False,
+                **kwargs,
+            )
+            .annotate(is_buddy=Exists(buddies_exists))
+            .filter(is_buddy=True)
         )
     else:
         # If history_limit_days is 0, the client doesn't want any presence data.

@@ -15,7 +15,7 @@ from zerver.lib.presence import (
 from zerver.lib.users import get_user_ids_who_can_access_user
 from zerver.models import Client, UserPresence, UserProfile
 from zerver.models.clients import get_client
-from zerver.models.users import active_user_ids
+from zerver.models.users import active_user_ids, get_active_buddies_user_ids
 from zerver.tornado.django_api import send_event_rollback_unsafe
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ def send_presence_changed(
     # We solve that by sending an immediate presence update clients.
     #
     # The API documentation explains this interaction in more detail.
+    # user_ids = get_active_buddies_user_ids(user_profile.id)
     if settings.CAN_ACCESS_ALL_USERS_GROUP_LIMITS_PRESENCE:
         user_ids = get_user_ids_who_can_access_user(user_profile)
     else:

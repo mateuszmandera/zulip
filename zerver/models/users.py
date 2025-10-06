@@ -1193,6 +1193,18 @@ def active_user_ids(realm_id: int) -> list[int]:
     return list(query)
 
 
+def active_buddies_user_ids_cache_key(user_id: int) -> str:
+    return f"active_buddies_user_ids:{user_id}"
+
+@cache_with_key(active_buddies_user_ids_cache_key, timeout=600)
+def get_active_buddies_user_ids(user_id: int) -> list[int]:
+    query = (
+        UserProfile.objects
+        .filter(buddy_lists__user_profile_id=user_id, is_active=True)
+        .values_list("id", flat=True)
+    )
+    return list(query)
+
 @cache_with_key(active_non_guest_user_ids_cache_key, timeout=3600 * 24 * 7)
 def active_non_guest_user_ids(realm_id: int) -> list[int]:
     query = (
